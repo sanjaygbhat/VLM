@@ -8,6 +8,7 @@ from app.utils.helpers import load_document_indices, save_document_indices
 def upload_document(file, user_id):
     filename = secure_filename(file.filename)
     doc_id = str(uuid.uuid4())
+    os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
     file_path = os.path.join(Config.UPLOAD_FOLDER, f"{doc_id}_{filename}")
     file.save(file_path)
     
