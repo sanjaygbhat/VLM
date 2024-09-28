@@ -6,6 +6,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from PIL import Image
 from app import Config
 from app.utils.helpers import load_document_indices
+from byaldi import RAG  # Import RAG from byaldi
 
 MODEL_NAME = "openbmb/MiniCPM-V-2_6"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
@@ -46,4 +47,10 @@ def generate_minicpm_response(prompt, image_path):
         }
     }
 
-# Keep the rest of the functions (query_document, query_image) as they are
+def query_document(doc_id, query, k=3):
+    # Implement document querying logic here
+    pass
+
+def query_image(image, query):
+    # Implement image querying logic here
+    pass
