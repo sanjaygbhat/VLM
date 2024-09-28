@@ -7,7 +7,7 @@ import torch.multiprocessing as mp
 assert mp.get_start_method() == 'spawn', "Spawn start method not set!"
 
 import torch
-from vllm import SamplingParams
+from vllm import SamplingParams, LLM
 import os
 import base64
 from byaldi import RAGMultiModalModel
@@ -16,7 +16,6 @@ from PIL import Image
 from app import Config
 from app.utils.helpers import load_document_indices
 from werkzeug.utils import secure_filename
-import multiprocessing as mp
 
 RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
 
@@ -29,22 +28,28 @@ torch.cuda.reset_peak_memory_stats()
 
 from app.cuda_init import initialize_llm, get_gpu_memory_usage
 
+llm = None
+llm_pool = None
+llm_future = None
+
 def init_llm_process():
-    print(f"GPU memory usage before LLM init: {get_gpu_memory_usage()}")
-    llm = initialize_llm()
-    print(f"GPU memory usage after LLM init: {get_gpu_memory_usage()}")
+    global llm, llm_pool, llm_future
+    if llm is None:
+        print(f"GPU memory usage before LLM init: {get_gpu_memory_usage()}")
+        llm = initialize_llm()
+        print(f"GPU memory usage after LLM init: {get_gpu_memory_usage()}")
     return llm
 
-llm_pool = mp.Pool(1)
-llm_future = llm_pool.apply_async(init_llm_process)
-
 def get_llm():
-    global llm_future
-    if llm_future is not None:
+    global llm, llm_pool, llm_future
+    if llm is None:
+        if llm_pool is None:
+            llm_pool = mp.Pool(1)
+        if llm_future is None:
+            llm_future = llm_pool.apply_async(init_llm_process)
         llm = llm_future.get()
         llm_future = None
-        return llm
-    return None
+    return llm
 
 def generate_minicpm_response(prompt, image_path):
     messages = [{"role": "user", "content": prompt}]
