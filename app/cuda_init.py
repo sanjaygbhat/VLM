@@ -1,7 +1,6 @@
 import os
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -37,11 +36,4 @@ def initialize_llm(rank, world_size):
     
     return model, tokenizer
 
-def run_model(rank, world_size):
-    model, tokenizer = initialize_llm(rank, world_size)
-    # Your model usage code here
-    cleanup()
-
-def init_distributed_model():
-    world_size = torch.cuda.device_count()
-    mp.spawn(run_model, args=(world_size,), nprocs=world_size, join=True)
+# Remove the run_model and init_distributed_model functions

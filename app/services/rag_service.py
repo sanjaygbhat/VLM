@@ -1,4 +1,4 @@
-from ..cuda_init import init_cuda, get_gpu_memory_usage, init_distributed_model
+from ..cuda_init import init_cuda, get_gpu_memory_usage
 init_cuda()
 
 import torch
@@ -11,7 +11,7 @@ MODEL_NAME = "openbmb/MiniCPM-V-2_6"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
 
 print(f"GPU memory usage before model init: {get_gpu_memory_usage()}")
-init_distributed_model()
+# Remove the init_distributed_model() call
 print(f"GPU memory usage after model init: {get_gpu_memory_usage()}")
 
 def generate_minicpm_response(prompt, image_path):
