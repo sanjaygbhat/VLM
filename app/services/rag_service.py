@@ -27,15 +27,13 @@ print(f"GPU memory usage before LLM init: {get_gpu_memory_usage():.2f} MB")
 llm = LLM(
     model=MODEL_NAME,
     trust_remote_code=True,
-    gpu_memory_utilization=0.6,  # Reduced from 0.7
-    max_model_len=1024,  # Reduced from 2048
+    gpu_memory_utilization=0.8,
+    max_model_len=1024,
     tensor_parallel_size=1,
     dtype="float16",
-    quantization="awq",  # Enable quantization
-    max_num_batched_tokens=512,  # Reduced from 1024
-    max_num_seqs=32,  # Reduced from 64
+    max_num_batched_tokens=1024,
+    max_num_seqs=16,
     enforce_eager=True,
-    swap_space=4 * 1024 * 1024 * 1024,  # 4GB swap space
 )
 
 print(f"GPU memory usage after LLM init: {get_gpu_memory_usage():.2f} MB")
@@ -60,10 +58,9 @@ def generate_minicpm_response(prompt, image_path):
 
     sampling_params = SamplingParams(
         stop_token_ids=stop_token_ids, 
-        use_beam_search=True,
-        temperature=0, 
-        best_of=3,
-        max_tokens=1024
+        temperature=0.7,
+        top_p=0.95,
+        max_tokens=256
     )
 
     outputs = llm.generate(inputs, sampling_params=sampling_params)
