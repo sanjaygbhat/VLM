@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.services.document_service import upload_document
 
+
 bp = Blueprint('document', __name__)
 
 @bp.route('/upload_pdf', methods=['POST'])
