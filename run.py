@@ -2,6 +2,7 @@ import os
 import sys
 import torch
 import torch.multiprocessing as mp
+import torch.distributed as dist
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -9,7 +10,13 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from app.cuda_init import init_cuda, initialize_llm, cleanup
 from app import create_app
 
+def setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
 def run_app(rank, world_size):
+    setup(rank, world_size)
     init_cuda()
     model, tokenizer = initialize_llm(rank, world_size)
     app = create_app(rank, world_size)
