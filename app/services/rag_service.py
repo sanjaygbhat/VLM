@@ -1,4 +1,5 @@
 import os
+import subprocess
 import base64
 import torch
 from byaldi import RAGMultiModalModel
@@ -137,3 +138,14 @@ def query_image(image, query):
         "query_image_base64": encoded_query_image,
         **minicpm_response
     }
+
+import subprocess
+
+def get_gpu_memory_usage():
+    result = subprocess.check_output(
+        ['nvidia-smi', '--query-gpu=memory.used', '--format=csv,nounits,noheader']
+    )
+    return int(result)
+
+# Add this line just before LLM initialization
+print(f"GPU memory usage before LLM init: {get_gpu_memory_usage()} MB")
