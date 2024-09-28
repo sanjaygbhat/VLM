@@ -24,7 +24,8 @@ def initialize_llm(rank, world_size):
         MODEL_NAME,
         trust_remote_code=True,
         torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32,
-    ).to(device)
+    )
+    model.to(device)  # Ensure model is moved to the device
     
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
     
@@ -33,8 +34,14 @@ def initialize_llm(rank, world_size):
 def initialize_rag(rank, world_size):
     device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
     print(f"Process {rank}: Loading RAG model to device {device}")
+    
+    # Initialize RAG model without using .to(device)
     RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
-    RAG = RAG.to(device)  # Ensure RAG supports .to(device)
+    
+    # If RAGMultiModalModel handles device assignment internally, ensure it uses the correct device
+    if torch.cuda.is_available():
+        torch.cuda.set_device(device)
+    
     return RAG
 
 def cleanup():

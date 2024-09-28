@@ -46,7 +46,7 @@ def query_document(doc_id, query, k=3):
         raise ValueError(f"Invalid document_id: {doc_id}")
     
     index_path = document_indices[doc_id]
-    RAG_specific = current_app.config['RAG'].from_index(index_path).to(current_app.config['RAG'].device)
+    RAG_specific = current_app.config['RAG'].from_index(index_path)
     
     results = RAG_specific.search(query, k=k)
     
@@ -76,7 +76,7 @@ def query_image(image, query):
     image_path = image.filename
     image.save(image_path)
     
-    RAG_specific = current_app.config['RAG'].from_index(index_path=image_path).to(current_app.config['RAG'].device)
+    RAG_specific = current_app.config['RAG'].from_index(index_path=image_path)
     rag_results = RAG_specific.search(query, image_path=image_path)
     
     serializable_results = [

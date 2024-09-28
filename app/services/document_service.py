@@ -8,6 +8,7 @@ from app.services.rag_service import query_document
 from app import Config, db
 from app.utils.helpers import load_document_indices, save_document_indices
 from app.models.document import Document
+from flask import current_app
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,9 +50,15 @@ def upload_document(file, user_id):
     # Step 4: Indexing using RAG
     start_time = time.time()
     try:
-        # Replace with actual indexing logic if available
-        # Here, we use a placeholder query to simulate indexing
-        query_document(doc_id, "Indexing: This is a dummy query for indexing.", k=1)
+        # Initialize RAG model from app config
+        RAG = current_app.config['RAG']
+        # Index the document
+        RAG.index(
+            input_path=file_path,
+            index_name=index_name,
+            store_collection_with_index=True,
+            overwrite=True
+        )
     except Exception as e:
         logger.error(f"Indexing failed: {e}")
         return None
