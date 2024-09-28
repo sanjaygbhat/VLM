@@ -36,7 +36,6 @@ llm = LLM(
     max_num_seqs=32,  # Reduced from 64
     enforce_eager=True,
     swap_space=4 * 1024 * 1024 * 1024,  # 4GB swap space
-    offload_dir="/tmp/vllm_offload"  # Enable CPU offloading
 )
 
 print(f"GPU memory usage after LLM init: {get_gpu_memory_usage():.2f} MB")
