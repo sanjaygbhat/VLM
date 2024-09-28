@@ -6,14 +6,13 @@ import torch.multiprocessing as mp
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from app.cuda_init import init_cuda, setup, initialize_llm, cleanup
+from app.cuda_init import init_cuda, initialize_llm, cleanup
 from app import create_app
 
 def run_app(rank, world_size):
-    setup(rank, world_size)
     init_cuda()
     model, tokenizer = initialize_llm(rank, world_size)
-    app = create_app()
+    app = create_app(rank, world_size)
     app.config['RANK'] = rank
     app.config['WORLD_SIZE'] = world_size
     app.model = model
