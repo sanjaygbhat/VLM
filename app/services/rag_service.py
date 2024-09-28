@@ -1,5 +1,6 @@
 import os
 import base64
+import torch
 from byaldi import RAGMultiModalModel
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
@@ -12,11 +13,21 @@ RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
 
 MODEL_NAME = "openbmb/MiniCPM-V-2_6"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+
+# Clear CUDA cache
+torch.cuda.empty_cache()
+
 llm = LLM(
     model=MODEL_NAME,
     trust_remote_code=True,
-    gpu_memory_utilization=0.9,
-    max_model_len=2048
+    gpu_memory_utilization=0.8,  # Reduced from 0.9
+    max_model_len=2048,
+    tensor_parallel_size=1,
+    dtype="float16",
+    quantization=None,  # Remove quantization for now
+    max_num_batched_tokens=2048,  # Reduced from 4096
+    max_num_seqs=128,  # Reduced from 256
+    enforce_eager=True,
 )
 
 def generate_minicpm_response(prompt, image_path):
