@@ -27,14 +27,17 @@ print(f"GPU memory usage before LLM init: {get_gpu_memory_usage():.2f} MB")
 llm = LLM(
     model=MODEL_NAME,
     trust_remote_code=True,
-    gpu_memory_utilization=0.8,
-    max_model_len=1024,
-    tensor_parallel_size=1,
+    gpu_memory_utilization=0.9,
+    max_model_len=2048,
+    tensor_parallel_size=2,
     dtype="float16",
-    max_num_batched_tokens=1024,
-    max_num_seqs=16,
+    max_num_batched_tokens=4096,
+    max_num_seqs=64,
     enforce_eager=True,
 )
+
+def get_gpu_memory_usage():
+    return [torch.cuda.memory_allocated(i) / (1024 * 1024) for i in range(torch.cuda.device_count())]
 
 print(f"GPU memory usage after LLM init: {get_gpu_memory_usage():.2f} MB")
 
