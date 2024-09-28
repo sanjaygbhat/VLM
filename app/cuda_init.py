@@ -1,0 +1,8 @@
+import multiprocessing
+import os
+
+def init_cuda():
+    multiprocessing.set_start_method('spawn', force=True)
+    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128,expandable_segments:True'
+    os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Use two GPUs

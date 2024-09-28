@@ -1,7 +1,11 @@
+from ..cuda_init import init_cuda
+init_cuda()
+
+import torch
+from vllm import LLM, SamplingParams
 import os
 import subprocess
 import base64
-import torch
 from byaldi import RAGMultiModalModel
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
