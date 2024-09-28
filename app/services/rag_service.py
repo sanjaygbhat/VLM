@@ -1,24 +1,13 @@
-from ..cuda_init import init_cuda, get_gpu_memory_usage
-init_cuda()
-
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from flask import current_app
 from PIL import Image
-from app import Config
 from app.utils.helpers import load_document_indices
 from byaldi import RAGMultiModalModel
+import torch
 
-MODEL_NAME = "openbmb/MiniCPM-V-2_6"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
-model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, trust_remote_code=True)
-
-print(f"GPU memory usage before model init: {get_gpu_memory_usage()}")
-model.to('cuda')
-print(f"GPU memory usage after model init: {get_gpu_memory_usage()}")
-
-RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
-
-def generate_minicpm_response(prompt, image_path):
+def generate_minicpm_response(prompt, image_path, device):
+    tokenizer = current_app.tokenizer
+    model = current_app.model
+    
     messages = [{"role": "user", "content": prompt}]
     minicpm_prompt = tokenizer.apply_chat_template(
         messages,
@@ -26,9 +15,12 @@ def generate_minicpm_response(prompt, image_path):
         add_generation_prompt=True
     )
 
-    inputs = tokenizer(minicpm_prompt, return_tensors="pt").to('cuda')
-    image = Image.open(image_path).convert("RGB")
+    inputs = tokenizer(minicpm_prompt, return_tensors="pt").to(device)
     
+    if image_path:
+        image = Image.open(image_path).convert("RGB")
+        # Process the image as needed
+
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
@@ -72,7 +64,8 @@ def query_document(doc_id, query, k=3):
     context = "\n".join([f"Excerpt {i+1}:\n{result['metadata']}" for i, result in enumerate(serializable_results)])
     prompt = f"Based on the following excerpts, please answer this question: {query}\n\n{context}"
     
-    response = generate_minicpm_response(prompt, None)
+    device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
+    response = generate_minicpm_response(prompt, None, device)
     
     return {
         "results": serializable_results,
@@ -99,7 +92,8 @@ def query_image(image, query):
     context = "\n".join([f"Image {i+1}:\n{result['metadata']}" for i, result in enumerate(serializable_results)])
     prompt = f"Based on the following image descriptions, please answer this question: {query}\n\n{context}"
     
-    response = generate_minicpm_response(prompt, image_path)
+    device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
+    response = generate_minicpm_response(prompt, image_path, device)
     
     return {
         "results": serializable_results,

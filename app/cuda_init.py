@@ -4,10 +4,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 def init_cuda():
     if torch.cuda.is_available():
-        print("Initializing CUDA settings...")
-        torch.cuda.empty_cache()
-        os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Use two GPUs
-        print("CUDA settings initialized.")
+        print("CUDA is available.")
     else:
         print("CUDA is not available. Using CPU.")
 
@@ -17,20 +14,18 @@ def get_gpu_memory_usage():
 def initialize_llm(rank, world_size):
     MODEL_NAME = "openbmb/MiniCPM-V-2_6"
     
-    # Create a custom device map
-    device_map = {
-        'llm': rank % world_size,
-        'vpm': 0,  # Assign vision model to first GPU
-        'resampler': world_size - 1  # Assign resampler to last GPU
-    }
+    # Assign a specific GPU to this process
+    device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+    print(f"Process {rank}: Using device {device}")
     
-    # Load the model with the custom device map
+    # Load the model on the assigned device
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         trust_remote_code=True,
-        device_map=device_map,
-        max_memory={i: f"{int(torch.cuda.get_device_properties(i).total_memory * 0.8 / 1024**3)}GiB" for i in range(world_size)}
-    )
+        device_map="auto",
+        torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32,
+        # Adjust max_memory if necessary
+    ).to(device)
     
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
     
@@ -38,5 +33,3 @@ def initialize_llm(rank, world_size):
 
 def cleanup():
     torch.cuda.empty_cache()
-
-# Remove the run_model and init_distributed_model functions
