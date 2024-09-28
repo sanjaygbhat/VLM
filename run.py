@@ -3,7 +3,6 @@ import sys
 import torch
 import torch.multiprocessing as mp
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -21,8 +20,7 @@ def run_app(rank, world_size):
     init_cuda()
     model, tokenizer = initialize_llm(rank, world_size)
     
-    # Wrap only the llm part of the model with DDP
-    model.llm = DDP(model.llm, device_ids=[rank])
+    # We don't need to wrap the model with DDP as it's already distributed
     
     app = create_app()
     app.config['RANK'] = rank
