@@ -1,13 +1,60 @@
 import os
 import base64
 from byaldi import RAGMultiModalModel
-import anthropic
+from transformers import AutoTokenizer
+from vllm import LLM, SamplingParams
+from PIL import Image
 from app import Config
 from app.utils.helpers import load_document_indices
 from werkzeug.utils import secure_filename
 
 RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
-client = anthropic.Anthropic(api_key=Config.ANTHROPIC_API_KEY)
+
+MODEL_NAME = "openbmb/MiniCPM-V-2_6"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+llm = LLM(
+    model=MODEL_NAME,
+    trust_remote_code=True,
+    gpu_memory_utilization=0.9,
+    max_model_len=2048
+)
+
+def generate_minicpm_response(prompt, image_path):
+    messages = [{"role": "user", "content": prompt}]
+    minicpm_prompt = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+
+    inputs = {
+        "prompt": minicpm_prompt,
+        "multi_modal_data": {
+            "image": Image.open(image_path).convert("RGB")
+        },
+    }
+
+    stop_tokens = ['<|im_end|>', '<|endoftext|>']
+    stop_token_ids = [tokenizer.convert_tokens_to_ids(i) for i in stop_tokens]
+
+    sampling_params = SamplingParams(
+        stop_token_ids=stop_token_ids, 
+        use_beam_search=True,
+        temperature=0, 
+        best_of=3,
+        max_tokens=1024
+    )
+
+    outputs = llm.generate(inputs, sampling_params=sampling_params)
+    
+    return {
+        "answer": outputs[0].outputs[0].text,
+        "tokens_consumed": {
+            "prompt_tokens": len(tokenizer.encode(minicpm_prompt)),
+            "completion_tokens": len(outputs[0].outputs[0].token_ids),
+            "total_tokens": len(tokenizer.encode(minicpm_prompt)) + len(outputs[0].outputs[0].token_ids)
+        }
+    }
 
 def query_document(doc_id, query, k):
     document_indices = load_document_indices()
@@ -32,42 +79,17 @@ def query_document(doc_id, query, k):
         } for result in results
     ]
     
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"Here are some relevant document excerpts:\n\n"
-                }
-            ]
-        }
-    ]
+    prompt = "Here are some relevant document excerpts:\n\n"
+    prompt += "\n".join([f"Excerpt {idx}:\nMetadata: {result['metadata']}\n" 
+                         for idx, result in enumerate(serializable_results, 1)])
+    prompt += f"\nBased on these excerpts, please answer the following question: {query}"
 
-    for idx, result in enumerate(serializable_results, 1):
-        messages[0]["content"].extend([
-            {"type": "text", "text": f"Excerpt {idx}:\n"},
-            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": result['base64']}},
-            {"type": "text", "text": f"Metadata: {result['metadata']}\n\n"}
-        ])
-
-    messages[0]["content"].append({"type": "text", "text": f"Based on these excerpts, please answer the following question: {query}"})
-
-    claude_response = client.messages.create(
-        model="claude-3-sonnet-20240229",
-        max_tokens=4000,
-        temperature=0,
-        messages=messages
-    )
+    image_path = os.path.join(Config.UPLOAD_FOLDER, f"{doc_id}.png")
+    minicpm_response = generate_minicpm_response(prompt, image_path)
     
     return {
         "results": serializable_results,
-        "answer": claude_response.content[0].text,
-        "tokens_consumed": {
-            "prompt_tokens": claude_response.usage.input_tokens,
-            "completion_tokens": claude_response.usage.output_tokens,
-            "total_tokens": claude_response.usage.input_tokens + claude_response.usage.output_tokens
-        }
+        **minicpm_response
     }
 
 def query_image(image, query):
@@ -90,51 +112,17 @@ def query_image(image, query):
     with open(image_path, "rb") as image_file:
         encoded_query_image = base64.b64encode(image_file.read()).decode('utf-8')
     
-    os.remove(image_path)
+    prompt = "Here's the query image and some relevant image results:\n\n"
+    prompt += "\n".join([f"Image {idx}:\nMetadata: {result['metadata']}\n" 
+                         for idx, result in enumerate(serializable_results, 1)])
+    prompt += f"\nBased on these images, please answer the following question: {query}"
+
+    minicpm_response = generate_minicpm_response(prompt, image_path)
     
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": "Here's the query image:"
-                },
-                {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": "image/png", "data": encoded_query_image}
-                },
-                {
-                    "type": "text",
-                    "text": "Here are some relevant image results:\n\n"
-                }
-            ]
-        }
-    ]
-
-    for idx, result in enumerate(serializable_results, 1):
-        messages[0]["content"].extend([
-            {"type": "text", "text": f"Image {idx}:\n"},
-            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": result['base64']}},
-            {"type": "text", "text": f"Metadata: {result['metadata']}\n\n"}
-        ])
-
-    messages[0]["content"].append({"type": "text", "text": f"Based on these images, please answer the following question: {query}"})
-
-    claude_response = client.messages.create(
-        model="claude-3-sonnet-20240229",
-        max_tokens=4000,
-        temperature=0,
-        messages=messages
-    )
+    os.remove(image_path)
     
     return {
         "results": serializable_results,
-        "answer": claude_response.content[0].text,
         "query_image_base64": encoded_query_image,
-        "tokens_consumed": {
-            "prompt_tokens": claude_response.usage.input_tokens,
-            "completion_tokens": claude_response.usage.output_tokens,
-            "total_tokens": claude_response.usage.input_tokens + claude_response.usage.output_tokens
-        }
+        **minicpm_response
     }
