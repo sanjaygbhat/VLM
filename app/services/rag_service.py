@@ -1,6 +1,11 @@
 from ..cuda_init import init_cuda
 init_cuda()
 
+import multiprocessing
+import torch.multiprocessing as mp
+
+assert mp.get_start_method() == 'spawn', "Spawn start method not set!"
+
 import torch
 from vllm import LLM, SamplingParams
 import os
