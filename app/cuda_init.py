@@ -19,20 +19,17 @@ def get_gpu_memory_usage():
 def initialize_llm(rank, world_size):
     MODEL_NAME = "openbmb/MiniCPM-V-2_6"
     
-    # Calculate the number of layers to put on each GPU
+    # Load the model
     model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, trust_remote_code=True)
-    num_layers = len(model.transformer.h)
-    layers_per_gpu = num_layers // world_size
     
-    # Assign layers to each GPU
-    start_layer = rank * layers_per_gpu
-    end_layer = start_layer + layers_per_gpu if rank < world_size - 1 else num_layers
+    # Inspect the model structure
+    print(model)
     
-    # Create a device map to distribute the model across GPUs
-    device_map = {f'transformer.h.{i}': rank for i in range(start_layer, end_layer)}
-    device_map['transformer.wte'] = 0  # Embedding layer on first GPU
-    device_map['transformer.ln_f'] = world_size - 1  # Final layer norm on last GPU
-    device_map['lm_head'] = world_size - 1  # Language model head on last GPU
+    # Create a simple device map to distribute the model across GPUs
+    device_map = {f'model.layers.{i}': i % world_size for i in range(len(model.model.layers))}
+    device_map['model.embed_tokens'] = 0
+    device_map['model.norm'] = world_size - 1
+    device_map['lm_head'] = world_size - 1
     
     # Load the model with the custom device map
     model = AutoModelForCausalLM.from_pretrained(
@@ -41,6 +38,9 @@ def initialize_llm(rank, world_size):
         device_map=device_map,
         max_memory={i: f"{int(torch.cuda.get_device_properties(i).total_memory * 0.8 / 1024**3)}GiB" for i in range(world_size)}
     )
+    
+    # Move the model to the current device
+    model.to(rank)
     
     # Wrap the model with DDP
     model = DDP(model, device_ids=[rank])
