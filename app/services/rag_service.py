@@ -25,9 +25,9 @@ def generate_minicpm_response(prompt, image_path):
     inputs = tokenizer(minicpm_prompt, return_tensors="pt").to('cuda')
     image = Image.open(image_path).convert("RGB")
     
-    # Assuming the model has been initialized with DDP
+    # Assuming the model has been initialized with a custom device map
     with torch.no_grad():
-        outputs = model.module.generate(
+        outputs = model.generate(
             **inputs,
             max_new_tokens=256,
             do_sample=True,

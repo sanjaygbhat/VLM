@@ -20,14 +20,12 @@ def run_app(rank, world_size):
     init_cuda()
     model, tokenizer = initialize_llm(rank, world_size)
     
-    # We don't need to wrap the model with DDP as it's already distributed
-    
     app = create_app()
     app.config['RANK'] = rank
     app.config['WORLD_SIZE'] = world_size
     app.model = model
     app.tokenizer = tokenizer
-    app.run(host='0.0.0.0', port=5000 + rank)  # Use different ports for each process
+    app.run(host='0.0.0.0', port=5000 + rank)
     cleanup()
 
 def main():
