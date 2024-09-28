@@ -1,7 +1,6 @@
 from flask import current_app
 from PIL import Image
 from app.utils.helpers import load_document_indices
-from byaldi import RAGMultiModalModel
 import torch
 
 def generate_minicpm_response(prompt, image_path, device):

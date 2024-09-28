@@ -15,8 +15,13 @@ def query_doc():
     if not doc_id or not query:
         return jsonify({"error": "Missing document_id or query"}), 400
     
-    results = query_document(doc_id, query, k)
-    return jsonify(results), 200
+    try:
+        results = query_document(doc_id, query, k)
+        return jsonify(results), 200
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"error": "An error occurred while processing the query."}), 500
 
 @bp.route('/query_image', methods=['POST'])
 @jwt_required()
@@ -29,5 +34,10 @@ def query_img():
     if not query:
         return jsonify({"error": "Missing query"}), 400
     
-    results = query_image(image, query)
-    return jsonify(results), 200
+    if image and image.filename != '':
+        try:
+            results = query_image(image, query)
+            return jsonify(results), 200
+        except Exception as e:
+            return jsonify({"error": "An error occurred while processing the image query."}), 500
+    return jsonify({"error": "Invalid image file"}), 400
