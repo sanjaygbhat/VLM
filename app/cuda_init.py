@@ -1,7 +1,5 @@
 import os
 import torch
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 def init_cuda():
@@ -42,17 +40,11 @@ def initialize_llm(rank, world_size):
         max_memory={i: f"{int(torch.cuda.get_device_properties(i).total_memory * 0.8 / 1024**3)}GiB" for i in range(world_size)}
     )
     
-    # Move the model to the current device
-    model.to(rank)
-    
-    # Wrap the model with DDP
-    model = DDP(model, device_ids=[rank])
-    
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
     
     return model, tokenizer
 
 def cleanup():
-    dist.destroy_process_group()
+    torch.cuda.empty_cache()
 
 # Remove the run_model and init_distributed_model functions
