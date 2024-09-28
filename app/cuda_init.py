@@ -1,6 +1,7 @@
 import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from byaldi import RAGMultiModalModel
 
 def init_cuda():
     if torch.cuda.is_available():
@@ -18,18 +19,23 @@ def initialize_llm(rank, world_size):
     device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
     print(f"Process {rank}: Using device {device}")
     
-    # Load the model on the assigned device
+    # Load the model directly to the assigned device
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         trust_remote_code=True,
-        device_map="auto",
         torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32,
-        # Adjust max_memory if necessary
     ).to(device)
     
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
     
     return model, tokenizer
+
+def initialize_rag(rank, world_size):
+    device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+    print(f"Process {rank}: Loading RAG model to device {device}")
+    RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
+    RAG = RAG.to(device)  # Ensure RAG supports .to(device)
+    return RAG
 
 def cleanup():
     torch.cuda.empty_cache()

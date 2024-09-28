@@ -7,7 +7,7 @@ import torch.distributed as dist
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from app.cuda_init import init_cuda, initialize_llm, cleanup
+from app.cuda_init import init_cuda, initialize_llm, initialize_rag, cleanup
 from app import create_app
 
 def setup(rank, world_size):
@@ -20,12 +20,14 @@ def run_app(rank, world_size):
         setup(rank, world_size)
         init_cuda()
         model, tokenizer = initialize_llm(rank, world_size)
+        RAG = initialize_rag(rank, world_size)
         
         app = create_app()
         app.config['RANK'] = rank
         app.config['WORLD_SIZE'] = world_size
         app.model = model
         app.tokenizer = tokenizer
+        app.config['RAG'] = RAG
         app.run(host='0.0.0.0', port=5000 + rank)
     except Exception as e:
         print(f"Error in process {rank}: {e}")

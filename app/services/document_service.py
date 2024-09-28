@@ -4,7 +4,7 @@ import os
 import uuid
 import hashlib
 from werkzeug.utils import secure_filename
-from app.services.rag_service import query_document  # Update import as RAG is now handled in rag_service
+from app.services.rag_service import query_document
 from app import Config, db
 from app.utils.helpers import load_document_indices, save_document_indices
 from app.models.document import Document
@@ -49,8 +49,9 @@ def upload_document(file, user_id):
     # Step 4: Indexing using RAG
     start_time = time.time()
     try:
-        indexing_results = query_document(doc_id, "Indexing", k=1)  # Replace "Indexing" with appropriate dummy query if needed
-        # Assuming RAG.index is replaced by query_document for indexing
+        # Replace with actual indexing logic if available
+        # Here, we use a placeholder query to simulate indexing
+        query_document(doc_id, "Indexing: This is a dummy query for indexing.", k=1)
     except Exception as e:
         logger.error(f"Indexing failed: {e}")
         return None

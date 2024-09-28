@@ -2,7 +2,6 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.services.document_service import upload_document
 
-
 bp = Blueprint('document', __name__)
 
 @bp.route('/upload_pdf', methods=['POST'])
@@ -15,8 +14,9 @@ def upload_pdf():
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
     if file and file.filename.lower().endswith('.pdf'):
-        doc_id = upload_document(file, current_user)
-        if doc_id is None:
+        upload_result = upload_document(file, current_user)
+        if upload_result is None:
             return jsonify({"error": "Failed to process document"}), 500
-        return jsonify({"document_id": doc_id}), 200
+        doc_id, indexing_time = upload_result
+        return jsonify({"document_id": doc_id, "indexing_time": indexing_time}), 200
     return jsonify({"error": "Invalid file type"}), 400
