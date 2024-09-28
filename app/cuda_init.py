@@ -19,17 +19,20 @@ def get_gpu_memory_usage():
 def initialize_llm(rank, world_size):
     MODEL_NAME = "openbmb/MiniCPM-V-2_6"
     
-    # Load the model
-    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, trust_remote_code=True)
+    # Create a device map to distribute the model across GPUs
+    device_map = {
+        'llm.model.embed_tokens': 0,
+        'llm.model.norm': world_size - 1,
+        'llm.lm_head': world_size - 1,
+        'vpm': 0,  # Assign vision model to first GPU
+        'resampler': world_size - 1  # Assign resampler to last GPU
+    }
     
-    # Inspect the model structure
-    print(model)
-    
-    # Create a simple device map to distribute the model across GPUs
-    device_map = {f'model.layers.{i}': i % world_size for i in range(len(model.model.layers))}
-    device_map['model.embed_tokens'] = 0
-    device_map['model.norm'] = world_size - 1
-    device_map['lm_head'] = world_size - 1
+    # Distribute LLM layers
+    llm_layers = 28  # Number of LLM layers from the model printout
+    layers_per_gpu = llm_layers // world_size
+    for i in range(llm_layers):
+        device_map[f'llm.model.layers.{i}'] = i // layers_per_gpu
     
     # Load the model with the custom device map
     model = AutoModelForCausalLM.from_pretrained(
