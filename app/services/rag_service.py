@@ -7,17 +7,16 @@ import torch.multiprocessing as mp
 assert mp.get_start_method() == 'spawn', "Spawn start method not set!"
 
 import torch
-from vllm import LLM, SamplingParams
+from vllm import SamplingParams
 import os
-import subprocess
 import base64
 from byaldi import RAGMultiModalModel
 from transformers import AutoTokenizer
-from vllm import LLM, SamplingParams
 from PIL import Image
 from app import Config
 from app.utils.helpers import load_document_indices
 from werkzeug.utils import secure_filename
+import multiprocessing as mp
 
 RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
 
@@ -28,27 +27,24 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
 torch.cuda.empty_cache()
 torch.cuda.reset_peak_memory_stats()
 
-def get_gpu_memory_usage():
-    return torch.cuda.memory_allocated() / (1024 * 1024)
+from app.cuda_init import initialize_llm, get_gpu_memory_usage
 
-print(f"GPU memory usage before LLM init: {get_gpu_memory_usage():.2f} MB")
+def init_llm_process():
+    print(f"GPU memory usage before LLM init: {get_gpu_memory_usage()}")
+    llm = initialize_llm()
+    print(f"GPU memory usage after LLM init: {get_gpu_memory_usage()}")
+    return llm
 
-llm = LLM(
-    model=MODEL_NAME,
-    trust_remote_code=True,
-    gpu_memory_utilization=0.9,
-    max_model_len=2048,
-    tensor_parallel_size=2,
-    dtype="float16",
-    max_num_batched_tokens=4096,
-    max_num_seqs=64,
-    enforce_eager=True,
-)
+llm_pool = mp.Pool(1)
+llm_future = llm_pool.apply_async(init_llm_process)
 
-def get_gpu_memory_usage():
-    return [torch.cuda.memory_allocated(i) / (1024 * 1024) for i in range(torch.cuda.device_count())]
-
-print(f"GPU memory usage after LLM init: {get_gpu_memory_usage():.2f} MB")
+def get_llm():
+    global llm_future
+    if llm_future is not None:
+        llm = llm_future.get()
+        llm_future = None
+        return llm
+    return None
 
 def generate_minicpm_response(prompt, image_path):
     messages = [{"role": "user", "content": prompt}]
@@ -75,7 +71,7 @@ def generate_minicpm_response(prompt, image_path):
         max_tokens=256
     )
 
-    outputs = llm.generate(inputs, sampling_params=sampling_params)
+    outputs = get_llm().generate(inputs, sampling_params=sampling_params)
     
     return {
         "answer": outputs[0].outputs[0].text,
@@ -156,11 +152,3 @@ def query_image(image, query):
         "query_image_base64": encoded_query_image,
         **minicpm_response
     }
-
-import subprocess
-
-def get_gpu_memory_usage():
-    return torch.cuda.memory_allocated() / (1024 * 1024)
-
-# Add this line just before LLM initialization
-print(f"GPU memory usage before LLM init: {get_gpu_memory_usage():.2f} MB")
