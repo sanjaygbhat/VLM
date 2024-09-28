@@ -17,19 +17,29 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
 
 # Clear CUDA cache
 torch.cuda.empty_cache()
+torch.cuda.reset_peak_memory_stats()
+
+def get_gpu_memory_usage():
+    return torch.cuda.memory_allocated() / (1024 * 1024)
+
+print(f"GPU memory usage before LLM init: {get_gpu_memory_usage():.2f} MB")
 
 llm = LLM(
     model=MODEL_NAME,
     trust_remote_code=True,
-    gpu_memory_utilization=0.8,  # Reduced from 0.9
-    max_model_len=2048,
+    gpu_memory_utilization=0.6,  # Reduced from 0.7
+    max_model_len=1024,  # Reduced from 2048
     tensor_parallel_size=1,
     dtype="float16",
-    quantization=None,  # Remove quantization for now
-    max_num_batched_tokens=2048,  # Reduced from 4096
-    max_num_seqs=128,  # Reduced from 256
+    quantization="awq",  # Enable quantization
+    max_num_batched_tokens=512,  # Reduced from 1024
+    max_num_seqs=32,  # Reduced from 64
     enforce_eager=True,
+    swap_space=4 * 1024 * 1024 * 1024,  # 4GB swap space
+    offload_dir="/tmp/vllm_offload"  # Enable CPU offloading
 )
+
+print(f"GPU memory usage after LLM init: {get_gpu_memory_usage():.2f} MB")
 
 def generate_minicpm_response(prompt, image_path):
     messages = [{"role": "user", "content": prompt}]
@@ -142,10 +152,7 @@ def query_image(image, query):
 import subprocess
 
 def get_gpu_memory_usage():
-    result = subprocess.check_output(
-        ['nvidia-smi', '--query-gpu=memory.used', '--format=csv,nounits,noheader']
-    )
-    return int(result)
+    return torch.cuda.memory_allocated() / (1024 * 1024)
 
 # Add this line just before LLM initialization
-print(f"GPU memory usage before LLM init: {get_gpu_memory_usage()} MB")
+print(f"GPU memory usage before LLM init: {get_gpu_memory_usage():.2f} MB")
