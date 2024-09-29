@@ -12,6 +12,21 @@ sudo apt-get install python3-venv -y
 # Install Poppler
 sudo apt-get install poppler-utils -y
 
+# Install PostgreSQL (if not already installed)
+sudo apt-get install postgresql postgresql-contrib -y
+
+# Start PostgreSQL service
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
+
+# Create PostgreSQL user and database
+# Replace 'yourusername' and 'yourpassword' with desired credentials
+sudo -i -u postgres bash -c "psql -c \"CREATE USER yourusername WITH PASSWORD 'yourpassword';\""
+sudo -i -u postgres bash -c "psql -c \"CREATE DATABASE vlm_db OWNER yourusername;\""
+
+# Set environment variables for PostgreSQL
+echo "export DATABASE_URL='postgresql://yourusername:yourpassword@localhost:5432/vlm_db'" >> ~/.bashrc
+
 # Install CUDA (Ensure compatibility with PyTorch)
 # Check if CUDA is already installed
 if ! command -v nvcc &> /dev/null
@@ -59,16 +74,14 @@ pip install -r requirements.txt
 
 # Set up environment variables
 echo "export SECRET_KEY=iceybella" >> ~/.bashrc
-echo "export DATABASE_URL='sqlite:///your_database.db'" >> ~/.bashrc
-# Set other necessary environment variables here
 source ~/.bashrc
 
 # Create necessary directories
 mkdir -p uploads indices
 
-# Initialize the database
+# Initialize the database with Flask-Migrate
 flask db init
-flask db migrate
+flask db migrate -m "Initial migration."
 flask db upgrade
 
 # Provide instruction to the user
