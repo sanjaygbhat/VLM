@@ -40,37 +40,48 @@ def generate_minicpm_response(prompt, image_path, device):
         }
     }
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def query_document(doc_id, query, k=3):
-    document_indices = load_document_indices()
-    if doc_id not in document_indices:
-        raise ValueError(f"Invalid document_id: {doc_id}")
-    
-    index_path = document_indices[doc_id]
-    RAG_specific = current_app.config['RAG'].from_index(index_path)
-    
-    results = RAG_specific.search(query, k=k)
-    
-    serializable_results = [
-        {
-            "doc_id": result.doc_id,
-            "page_num": result.page_num,
-            "score": result.score,
-            "metadata": result.metadata,
-            "base64": result.base64
-        } for result in results
-    ]
-    
-    context = "\n".join([f"Excerpt {i+1}:\n{result['metadata']}" for i, result in enumerate(serializable_results)])
-    prompt = f"Based on the following excerpts, please answer this question: {query}\n\n{context}"
-    
-    device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
-    response = generate_minicpm_response(prompt, None, device)
-    
-    return {
-        "results": serializable_results,
-        "answer": response["answer"],
-        "tokens_consumed": response["tokens_consumed"]
-    }
+    try:
+        document_indices = load_document_indices()
+        if doc_id not in document_indices:
+            raise ValueError(f"Invalid document_id: {doc_id}")
+        
+        index_path = document_indices[doc_id]
+        logger.info(f"Loading index from path: {index_path}")
+        RAG_specific = current_app.config['RAG'].from_index(index_path)
+        
+        logger.info(f"Performing search with query: {query}")
+        results = RAG_specific.search(query, k=k)
+        
+        serializable_results = [
+            {
+                "doc_id": result.doc_id,
+                "page_num": result.page_num,
+                "score": result.score,
+                "metadata": result.metadata,
+                "base64": result.base64
+            } for result in results
+        ]
+        
+        context = "\n".join([f"Excerpt {i+1}:\n{result['metadata']}" for i, result in enumerate(serializable_results)])
+        prompt = f"Based on the following excerpts, please answer this question: {query}\n\n{context}"
+        
+        device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
+        logger.info(f"Generating response using device: {device}")
+        response = generate_minicpm_response(prompt, None, device)
+        
+        return {
+            "results": serializable_results,
+            "answer": response["answer"],
+            "tokens_consumed": response["tokens_consumed"]
+        }
+    except Exception as e:
+        logger.error(f"Error in query_document: {str(e)}", exc_info=True)
+        raise
 
 def query_image(image, query):
     image_path = image.filename

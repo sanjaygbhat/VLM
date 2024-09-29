@@ -3,6 +3,9 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 from config import Config
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 db = SQLAlchemy()
 migrate = Migrate()
