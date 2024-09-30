@@ -30,9 +30,9 @@ def create_app(config_class=Config):
     app.register_blueprint(document.bp)
     app.register_blueprint(query.bp)
 
-    # Initialize tokenizer, model, and image processor
-    app.tokenizer = AutoTokenizer.from_pretrained("openbmb/MiniCPM-V-2_6")
-    app.model = AutoModelForCausalLM.from_pretrained("openbmb/MiniCPM-V-2_6").to('cuda')
-    app.image_processor = AutoImageProcessor.from_pretrained("openbmb/MiniCPM-V-2_6")
+    # Initialize tokenizer, model, and image processor with trust_remote_code=True
+    app.tokenizer = AutoTokenizer.from_pretrained("openbmb/MiniCPM-V-2_6", trust_remote_code=True)
+    app.model = AutoModelForCausalLM.from_pretrained("openbmb/MiniCPM-V-2_6", trust_remote_code=True).to('cuda')
+    app.image_processor = AutoImageProcessor.from_pretrained("openbmb/MiniCPM-V-2_6", trust_remote_code=True)
 
     return app

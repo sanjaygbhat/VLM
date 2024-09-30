@@ -36,6 +36,13 @@ def run_app(rank, world_size):
         if dist.is_initialized():
             dist.destroy_process_group()
 
+def initialize_model(rank):
+    # ... (other initializations)
+    model = AutoModelForCausalLM.from_pretrained("openbmb/MiniCPM-V-2_6", trust_remote_code=True).to(f'cuda:{rank}')
+    tokenizer = AutoTokenizer.from_pretrained("openbmb/MiniCPM-V-2_6", trust_remote_code=True)
+    image_processor = AutoImageProcessor.from_pretrained("openbmb/MiniCPM-V-2_6", trust_remote_code=True)
+    # ... (rest of the function)
+
 def main():
     mp.set_start_method('spawn', force=True)
     world_size = torch.cuda.device_count()
