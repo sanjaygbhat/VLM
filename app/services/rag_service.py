@@ -1,7 +1,10 @@
 from flask import current_app
 from PIL import Image
-from app.utils.helpers import load_document_indices
 import torch
+from app.utils.helpers import load_document_indices
+import logging
+
+logger = logging.getLogger(__name__)
 
 def generate_minicpm_response(prompt, image_path, device):
     tokenizer = current_app.tokenizer
@@ -16,13 +19,23 @@ def generate_minicpm_response(prompt, image_path, device):
 
     inputs = tokenizer(minicpm_prompt, return_tensors="pt").to(device)
     
+    # Initialize pixel_values as None
+    pixel_values = None
+    
     if image_path:
         image = Image.open(image_path).convert("RGB")
-        # Implement image processing if necessary
+        # Process the image here (you might need to resize, normalize, etc.)
+        # This is a placeholder - replace with actual image processing code
+        pixel_values = current_app.image_processor(images=image, return_tensors="pt").pixel_values.to(device)
+    else:
+        # If no image, create a dummy tensor of the correct shape
+        # You might need to adjust the shape based on your model's requirements
+        pixel_values = torch.zeros((1, 3, 224, 224), device=device)
 
     with torch.no_grad():
         outputs = model.generate(
-            **inputs,
+            input_ids=inputs.input_ids,
+            pixel_values=pixel_values,
             max_new_tokens=256,
             do_sample=True,
             temperature=0.7,
@@ -72,7 +85,7 @@ def query_document(doc_id, query, k=3):
         
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
         logger.info(f"Generating response using device: {device}")
-        response = generate_minicpm_response(prompt, None, device)
+        response = generate_minicpm_response(prompt, None, device)  # Pass None for image_path
         
         return {
             "results": serializable_results,
