@@ -32,16 +32,24 @@ def generate_minicpm_response(prompt, image_paths, device):
         # Process images in batch
         images = []
         for image_path in image_paths:
-            with Image.open(image_path) as img:
-                images.append(img)
+            try:
+                with Image.open(image_path) as img:
+                    images.append(img.copy())  # Copy to retain data after closing
+            except Exception as img_open_e:
+                logger.error(f"Failed to open image {image_path}: {str(img_open_e)}")
 
         if images:
-            # Process all images together
-            processed = image_processor(images, return_tensors="pt")
-            pixel_values = processed['pixel_values'].to(device)
-            logger.debug(f"Processed pixel_values type: {type(processed['pixel_values'])}")
+            try:
+                # Process all images together
+                processed = image_processor(images, return_tensors="pt")
+                pixel_values = processed['pixel_values'].to(device)
+                logger.debug(f"Processed pixel_values type: {type(processed['pixel_values'])}")
+            except Exception as img_proc_e:
+                logger.error(f"Failed to process images: {str(img_proc_e)}")
+                pixel_values = None  # Depending on your application, consider raising an error
         else:
             pixel_values = None  # Handle cases with no images if applicable
+            logger.debug("No images to process.")
 
         # Generate response
         with torch.no_grad():
@@ -131,7 +139,7 @@ def query_document(doc_id, query, k=3):
 
         return {
             "results": serializable_results,
-            "answer": "\n".join(response["answers"]),
+            "answer": response["answer"],  # Corrected key
             "tokens_consumed": response["tokens_consumed"]
         }
 
