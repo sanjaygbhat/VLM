@@ -34,11 +34,11 @@ def generate_minicpm_response(prompt, image_paths, device):
         for image_path in image_paths:
             with Image.open(image_path) as img:
                 pixel_value = image_processor(img, return_tensors="pt").pixel_values
-                pixel_values.append(pixel_value.to(device))
+                pixel_values.append(pixel_value.squeeze(0).to(device))
 
-        # Ensure pixel_values is a list of tensors
-        if not isinstance(pixel_values, list):
-            pixel_values = [pixel_values]
+        # Stack the pixel values
+        if pixel_values:
+            pixel_values = torch.stack(pixel_values)
 
         # Generate response
         with torch.no_grad():
