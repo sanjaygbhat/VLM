@@ -73,55 +73,35 @@ def generate_device_map(model, world_size, rank):
     return device_map
 
 def initialize_model(rank, world_size):
+    device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+    logger.info(f"Process {rank}: Using device {device}")
+    
     try:
-        # Use mixed precision
-        dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-        logger.debug(f"Process {rank}: Using dtype {dtype}.")
-
-        # Load the model without device mapping to inspect modules
-        logger.debug(f"Process {rank}: Loading model for device map generation...")
         model = AutoModelForCausalLM.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
-            trust_remote_code=True,
-            torch_dtype=dtype,
-            device_map=None,  # Initially load without device mapping
+            device_map='auto',  # Use automatic device mapping
+            torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32,
+            load_in_8bit=False,
             low_cpu_mem_usage=True,
+            trust_remote_code=True
         )
-        logger.debug(f"Process {rank}: Model loaded without device mapping.")
-
-        # Generate dynamic device map
-        device_map = generate_device_map(model, world_size, rank)
-
-        # Reload the model with the generated device_map
-        logger.debug(f"Process {rank}: Reloading model with device map...")
-        model = AutoModelForCausalLM.from_pretrained(
-            "openbmb/MiniCPM-V-2_6",
-            trust_remote_code=True,
-            torch_dtype=dtype,
-            device_map=device_map,
-            low_cpu_mem_usage=True,
-        )
-        logger.info(f"Process {rank}: Model loaded with device mapping.")
-
-        # Initialize tokenizer and image_processor
+        model.to(device)  # Ensure model is moved to the device
+        logger.info(f"Process {rank}: Model loaded and moved to {device}")
+        
         tokenizer = AutoTokenizer.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
             trust_remote_code=True
         )
+        
         image_processor = AutoImageProcessor.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
             trust_remote_code=True
         )
+        
         logger.info(f"Process {rank}: Tokenizer and image processor initialized.")
-
-        # Log all module names to verify device mapping
-        logger.debug(f"Process {rank}: Listing all module names and their devices:")
-        for name, module in model.named_modules():
-            device = next(module.parameters()).device if any(p.requires_grad for p in module.parameters()) else 'cpu'
-            logger.debug(f"Module: {name}, Device: {device}")
-
+        
         return model, tokenizer, image_processor
-
+    
     except Exception as e:
         logger.error(f"Process {rank}: Failed to initialize model - {e}", exc_info=True)
         raise
