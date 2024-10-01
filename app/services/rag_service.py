@@ -62,17 +62,6 @@ def generate_minicpm_response(prompt, image_paths, device):
         raise
 
 def query_document(doc_id, query, k=3):
-    """
-    Handles querying the document with the given ID and user query.
-
-    Args:
-        doc_id (str): The ID of the document to query.
-        query (str): The user's query.
-        k (int): The number of top results to retrieve.
-
-    Returns:
-        dict: A dictionary containing the search results, generated answer, and tokens consumed.
-    """
     try:
         document_indices = load_document_indices()
         if doc_id not in document_indices:
@@ -80,7 +69,10 @@ def query_document(doc_id, query, k=3):
 
         index_path = document_indices[doc_id]
         logger.info(f"Loading index from path: {index_path}")
-        RAG_specific = RAGMultiModalModel.from_index(index_path)
+        
+        # Use the RAG model from app config
+        RAG = current_app.config['RAG']
+        RAG_specific = RAG.from_index(index_path)
 
         logger.info(f"Performing search with query: {query}")
         results = RAG_specific.search(query, k=k)

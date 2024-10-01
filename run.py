@@ -6,6 +6,7 @@ import torch.distributed as dist
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoImageProcessor
 import logging
 import re
+from byaldi import RAGMultiModalModel  # Add this import
 
 # Import initialization functions for CUDA and RAG
 from app.cuda_init import initialize_rag
@@ -134,9 +135,13 @@ def run_app(rank, world_size):
     app.config['IMAGE_PROCESSOR'] = image_processor
 
     # Initialize RAG and add to app.config
-    RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
-    app.config['RAG'] = RAG
-    logger.debug(f"Process {rank}: RAG model initialized and added to app config.")
+    try:
+        RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
+        app.config['RAG'] = RAG
+        logger.debug(f"Process {rank}: RAG model initialized and added to app config.")
+    except Exception as e:
+        logger.error(f"Process {rank}: Failed to initialize RAG model - {e}", exc_info=True)
+        raise
 
     # Run the Flask app
     port = 5000 + rank

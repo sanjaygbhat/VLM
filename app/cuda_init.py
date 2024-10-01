@@ -48,25 +48,6 @@ def initialize_llm(rank, world_size):
         logger.error(f"Process {rank}: Failed to initialize LLM - {e}", exc_info=True)
         raise
 
-def initialize_rag(rank, world_size):
-    device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
-    logger.info(f"Process {rank}: Loading RAG model to device {device}")
-
-    try:
-        # Initialize RAG model without using .to(device)
-        RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
-        logger.debug(f"Process {rank}: RAG model loaded.")
-
-        # If RAGMultiModalModel handles device assignment internally, ensure it uses the correct device
-        if torch.cuda.is_available():
-            torch.cuda.set_device(device)
-            logger.debug(f"Process {rank}: Set CUDA device for RAG to {device}.")
-
-        return RAG
-    except Exception as e:
-        logger.error(f"Process {rank}: Failed to initialize RAG model - {e}", exc_info=True)
-        raise
-
 def cleanup():
     torch.cuda.empty_cache()
     logger.debug("Cleared CUDA cache.")
