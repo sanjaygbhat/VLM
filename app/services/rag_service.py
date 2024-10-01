@@ -22,19 +22,23 @@ def generate_minicpm_response(prompt, image_paths, device):
         model = current_app.config['MODEL']
         image_processor = current_app.config['IMAGE_PROCESSOR']
 
-        logger.debug("Preparing the prompt for MiniCPM.")
+        logger.debug(f"Preparing the prompt for MiniCPM. Prompt: {prompt[:100]}...")
+        logger.debug(f"Number of image paths: {len(image_paths)}")
 
         # Tokenize the prompt
         tokens = tokenizer(prompt, return_tensors='pt')
         input_ids = tokens['input_ids'].to(device)
         attention_mask = tokens['attention_mask'].to(device)
+        logger.debug(f"Tokenized prompt shape: {input_ids.shape}")
 
         # Process images in batch
         images = []
         for image_path in image_paths:
             try:
                 with Image.open(image_path) as img:
-                    images.append(img.copy())  # Copy to retain data after closing
+                    img_rgb = img.convert('RGB')
+                    images.append(img_rgb)
+                logger.debug(f"Loaded image from {image_path}, size: {img_rgb.size}, mode: {img_rgb.mode}")
             except Exception as img_open_e:
                 logger.error(f"Failed to open image {image_path}: {str(img_open_e)}")
 
@@ -44,12 +48,16 @@ def generate_minicpm_response(prompt, image_paths, device):
                 # Process all images together
                 processed = image_processor(images, return_tensors="pt")
                 logger.debug(f"Processed image_processor output keys: {processed.keys()}")
+                logger.debug(f"Processed image_processor output types: {[type(v) for v in processed.values()]}")
 
                 pixel_values = processed.get('pixel_values', None)
 
                 if pixel_values is None:
                     logger.error("Processed 'pixel_values' is missing.")
                     raise ValueError("Image processing failed: 'pixel_values' not found.")
+
+                logger.debug(f"Raw pixel_values type: {type(pixel_values)}")
+                logger.debug(f"Raw pixel_values shape: {pixel_values.shape if isinstance(pixel_values, torch.Tensor) else [v.shape for v in pixel_values] if isinstance(pixel_values, list) else 'Unknown'}")
 
                 # Ensure pixel_values is a tensor
                 if isinstance(pixel_values, list):
@@ -58,19 +66,22 @@ def generate_minicpm_response(prompt, image_paths, device):
                         logger.debug("Converted 'pixel_values' from list to tensor.")
                     except Exception as stack_e:
                         logger.error(f"Failed to stack 'pixel_values' list into tensor: {str(stack_e)}")
-                        logger.error(f"Failed to stack pixel_values list into tensor: {str(stack_e)}")
+                        logger.error(f"pixel_values list content: {[type(v) for v in pixel_values]}")
                         raise
                 elif isinstance(pixel_values, torch.Tensor):
                     pixel_values = pixel_values.to(device)
-                    logger.debug(f"pixel_values is already a tensor. Type: {type(pixel_values)}")
+                    logger.debug(f"pixel_values is already a tensor. Shape: {pixel_values.shape}")
                 else:
                     logger.error(f"Unexpected type for pixel_values: {type(pixel_values)}")
                     raise TypeError(f"Unexpected type for pixel_values: {type(pixel_values)}")
+
+                logger.debug(f"Final pixel_values shape: {pixel_values.shape}")
+                logger.debug(f"Final pixel_values device: {pixel_values.device}")
             except Exception as img_proc_e:
                 logger.error(f"Failed to process images: {str(img_proc_e)}")
                 pixel_values = None
         else:
-            pixel_values = None  # Handle cases with no images if applicable
+            pixel_values = None
             logger.debug("No images to process.")
 
         if pixel_values is None:
@@ -78,24 +89,35 @@ def generate_minicpm_response(prompt, image_paths, device):
             raise ValueError("Image processing failed. 'pixel_values' is None.")
 
         # Generate response
-        with torch.no_grad():
-            outputs = model.generate(
+        try:
+            logger.debug("Generating response with model...")
+            output = model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 pixel_values=pixel_values,
-                max_new_tokens=150
+                max_new_tokens=512,
+                do_sample=True,
+                temperature=0.7,
+                top_k=50,
+                top_p=0.95,
+                num_return_sequences=1,
             )
+            logger.debug(f"Model output shape: {output.shape}")
+        except Exception as gen_e:
+            logger.error(f"Error during model.generate: {str(gen_e)}")
+            raise
 
-        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        tokens_consumed = outputs.shape[1]
+        # Decode the output
+        response = tokenizer.decode(output[0], skip_special_tokens=True)
+        logger.debug(f"Decoded response length: {len(response)}")
 
         return {
-            "answer": answer,
-            "tokens_consumed": tokens_consumed
+            "answer": response,
+            "tokens_consumed": len(output[0])
         }
 
     except Exception as e:
-        logger.error(f"Error in generate_minicpm_response: {e}", exc_info=True)
+        logger.error(f"Error in generate_minicpm_response: {str(e)}", exc_info=True)
         raise
 
 def query_document(doc_id, query, k=3):
