@@ -8,8 +8,8 @@ import logging
 import re
 from byaldi import RAGMultiModalModel  # Add this import
 
-# Import initialization functions for CUDA and RAG
-from app.cuda_init import initialize_rag
+# Import initialization functions for CUDA
+from app.cuda_init import initialize_model  # Make sure this import exists
 
 # Configure logging with DEBUG level
 logging.basicConfig(

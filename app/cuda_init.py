@@ -1,7 +1,6 @@
 import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from byaldi import RAGMultiModalModel
 import logging
 
 # Configure logging
@@ -22,22 +21,20 @@ def get_gpu_memory_usage():
     logger.debug(f"GPU memory usage: {usage}")
     return usage
 
-def initialize_llm(rank, world_size):
+def initialize_model(rank, world_size):
     MODEL_NAME = "openbmb/MiniCPM-V-2_6"
 
-    # Assign a specific GPU to this process
     device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Process {rank}: Using device {device}")
 
-    # Since device mapping is handled in run.py, simply return the model and tokenizer
     try:
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,
             trust_remote_code=True,
             torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32,
-            device_map=None  # Device mapping handled in run.py
+            device_map=None
         )
-        model.to(device)  # Ensure model is moved to the device
+        model.to(device)
         logger.debug(f"Process {rank}: LLM model moved to {device}.")
 
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
