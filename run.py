@@ -124,7 +124,7 @@ def run_app(rank, world_size):
     model, tokenizer, image_processor = initialize_model(rank, world_size)
     
     # Create and configure Flask app
-    from app import create_app  # Ensure create_app is defined in app/__init__.py
+    from app import create_app
 
     app = create_app()
     app.config['RANK'] = rank
@@ -134,7 +134,7 @@ def run_app(rank, world_size):
     app.config['IMAGE_PROCESSOR'] = image_processor
 
     # Initialize RAG and add to app.config
-    RAG = initialize_rag(rank, world_size)
+    RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
     app.config['RAG'] = RAG
     logger.debug(f"Process {rank}: RAG model initialized and added to app config.")
 

@@ -17,17 +17,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def generate_minicpm_response(prompt, image_paths, device):
-    """
-    Generates a response using the MiniCPM model based on the given prompt and images.
-
-    Args:
-        prompt (str): The text prompt to generate a response for.
-        image_paths (list of str): List of image file paths to include in the prompt.
-        device (torch.device): The device to run the model on.
-
-    Returns:
-        dict: A dictionary containing the generated answers and tokens consumed.
-    """
     try:
         tokenizer = current_app.config['TOKENIZER']
         model = current_app.config['MODEL']
@@ -35,63 +24,36 @@ def generate_minicpm_response(prompt, image_paths, device):
 
         logger.debug("Preparing the prompt for MiniCPM.")
 
-        if image_paths:
-            k = len(image_paths)
-            logger.debug(f"Number of images to process: {k}")
+        # Tokenize the prompt
+        tokens = tokenizer(prompt, return_tensors='pt')
+        input_ids = tokens['input_ids'].to(device)
+        attention_mask = tokens['attention_mask'].to(device)
 
-            # Tokenize the prompt
-            tokens = tokenizer(prompt, return_tensors='pt')
-            input_ids = tokens['input_ids'].to(device)
-            attention_mask = tokens['attention_mask'].to(device)
+        # Process images
+        pixel_values = []
+        for image_path in image_paths:
+            with Image.open(image_path) as img:
+                pixel_value = image_processor(img, return_tensors="pt").pixel_values
+                pixel_values.append(pixel_value.to(device))
 
-            # Repeat input_ids and attention_mask k times to align with images
-            input_ids = input_ids.repeat(k, 1)
-            attention_mask = attention_mask.repeat(k, 1)
+        # Ensure pixel_values is a list of tensors
+        if not isinstance(pixel_values, list):
+            pixel_values = [pixel_values]
 
-            # Process each image and collect pixel_values
-            pixel_values_list = []
-            for idx, image_path in enumerate(image_paths):
-                logger.debug(f"Processing image {idx+1}/{k} at path: {image_path}")
-                try:
-                    image = Image.open(image_path).convert("RGB")
-                    pixel_values = image_processor(images=image, return_tensors='pt')['pixel_values'].to(device)
-                    pixel_values_list.append(pixel_values)
-                except Exception as img_e:
-                    logger.error(f"Failed to process image {image_path}: {img_e}")
-                    # Optionally, append a dummy tensor or handle accordingly
-                    pixel_values_list.append(torch.zeros((1, 3, 224, 224), device=device))
+        # Generate response
+        with torch.no_grad():
+            outputs = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                pixel_values=pixel_values,
+                max_new_tokens=150
+            )
 
-            # Concatenate pixel_values into a single tensor
-            pixel_values = torch.cat(pixel_values_list, dim=0)  # Shape: (k, C, H, W)
-
-            logger.debug("All images processed successfully.")
-
-        else:
-            # If no images are provided, create dummy pixel_values to satisfy model requirements
-            logger.debug("No images provided. Creating dummy pixel_values.")
-            pixel_values = torch.zeros((1, 3, 224, 224), device=device)
-            tokens = tokenizer(prompt, return_tensors='pt')
-            input_ids = tokens['input_ids'].to(device)
-            attention_mask = tokens['attention_mask'].to(device)
-
-            k = 1  # Batch size
-
-        logger.debug(f"Input IDs shape: {input_ids.shape}")
-        logger.debug(f"Pixel values shape: {pixel_values.shape}")
-
-        # Assuming the model's generate method accepts these inputs
-        outputs = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            pixel_values=pixel_values,
-            max_new_tokens=150  # Adjust as needed
-        )
-
-        answers = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        tokens_consumed = input_ids.size(1) * k
+        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        tokens_consumed = outputs.shape[1]
 
         return {
-            "answers": answers,
+            "answer": answer,
             "tokens_consumed": tokens_consumed
         }
 
@@ -182,14 +144,20 @@ def query_document(doc_id, query, k=3):
         logger.error(f"Error in query_document: {str(e)}", exc_info=True)
         raise
 
-def query_image(image, query):
+def query_image(image, query, user_id):
     try:
-        image_path = image.filename
-        image.save(image_path)
-        logger.info(f"Saved image to path: {image_path}")
+        # Save the image temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_image:
+            image.save(temp_image.name)
+            image_path = temp_image.name
 
-        RAG_specific = current_app.config['RAG'].from_index(index_path=image_path)
-        rag_results = RAG_specific.search(query, image_path=image_path)
+        logger.info(f"Saved image to temporary path: {image_path}")
+
+        # Initialize RAG model from app config
+        RAG = current_app.config['RAG']
+        
+        # Perform the search
+        rag_results = RAG.search(query, image_paths=[image_path], k=3)
 
         serializable_results = [
             {
@@ -206,11 +174,14 @@ def query_image(image, query):
 
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
         logger.debug(f"Using device {device} for generating response.")
-        response = generate_minicpm_response(prompt, [image_path], device)  # Pass as a list
+        response = generate_minicpm_response(prompt, [image_path], device)
+
+        # Clean up the temporary file
+        os.unlink(image_path)
 
         return {
             "results": serializable_results,
-            "answer": "\n".join(response["answers"]),
+            "answer": response["answer"],
             "tokens_consumed": response["tokens_consumed"]
         }
     except Exception as e:
