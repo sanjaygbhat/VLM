@@ -115,12 +115,9 @@ def upload_document(file, user_id):
 
 def query_document(doc_id, query, k=3):
     try:
-        # Load document indices
         document_indices = load_document_indices()
-        
         if doc_id not in document_indices:
-            logger.error(f"Document ID {doc_id} not found in indices.")
-            raise ValueError("Document not found.")
+            raise ValueError(f"Document with id {doc_id} not found in indices.")
 
         index_path = document_indices[doc_id]
         
@@ -129,11 +126,7 @@ def query_document(doc_id, query, k=3):
             raise ValueError("Index file not found.")
 
         # Initialize a new RAG instance for the specific document
-        RAG = RAGMultiModalModel.from_index(
-            index_path,
-            model_name="vidore/colpali-v1.2",  # Replace with your actual model
-            device=current_app.config['DEVICE']
-        )
+        RAG = RAGMultiModalModel.from_index(index_path)
         logger.debug(f"RAG model initialized with index {index_path} for doc_id {doc_id}.")
 
         # Perform the search
