@@ -4,7 +4,7 @@ import torch
 from app.utils.helpers import load_document_indices
 import logging
 import tempfile
-from base64 import b64decode
+import base64
 from io import BytesIO
 import os
 from byaldi import RAGMultiModalModel
@@ -79,27 +79,16 @@ def generate_minicpm_response(prompt, image_paths, device):
         logger.debug(f"Input IDs shape: {input_ids.shape}")
         logger.debug(f"Pixel values shape: {pixel_values.shape}")
 
-        # Generate the response using the model
+        # Assuming the model's generate method accepts these inputs
         outputs = model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
             pixel_values=pixel_values,
-            max_length=512,
-            num_return_sequences=1,
-            no_repeat_ngram_size=2,
-            early_stopping=True
+            max_new_tokens=150  # Adjust as needed
         )
 
-        # Decode the generated tokens to strings
-        if k > 1:
-            answers = [tokenizer.decode(outputs[i], skip_special_tokens=True) for i in range(outputs.size(0))]
-            logger.debug(f"Generated {len(answers)} answers.")
-        else:
-            answers = [tokenizer.decode(outputs[0], skip_special_tokens=True)]
-            logger.debug("Generated 1 answer.")
-
-        # Calculate tokens consumed
-        tokens_consumed = input_ids.size(1)
+        answers = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        tokens_consumed = input_ids.size(1) * k
 
         return {
             "answers": answers,
@@ -111,6 +100,17 @@ def generate_minicpm_response(prompt, image_paths, device):
         raise
 
 def query_document(doc_id, query, k=3):
+    """
+    Handles querying the document with the given ID and user query.
+
+    Args:
+        doc_id (str): The ID of the document to query.
+        query (str): The user's query.
+        k (int): The number of top results to retrieve.
+
+    Returns:
+        dict: A dictionary containing the search results, generated answer, and tokens consumed.
+    """
     try:
         document_indices = load_document_indices()
         if doc_id not in document_indices:
@@ -132,6 +132,7 @@ def query_document(doc_id, query, k=3):
                 "page_num": result.page_num,
                 "score": result.score,
                 "metadata": result.metadata,
+                # "base64": result.base64  # Optional: Include if needed
             }
             
             # Handle image data if present
@@ -139,7 +140,7 @@ def query_document(doc_id, query, k=3):
                 try:
                     # Decode base64 image
                     image_data = base64.b64decode(result.base64)
-                    image = Image.open(io.BytesIO(image_data))
+                    image = Image.open(BytesIO(image_data)).convert("RGB")
                     
                     # Save image to a temporary file
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
@@ -173,7 +174,7 @@ def query_document(doc_id, query, k=3):
 
         return {
             "results": serializable_results,
-            "answer": response["answer"],
+            "answer": "\n".join(response["answers"]),
             "tokens_consumed": response["tokens_consumed"]
         }
 
@@ -205,11 +206,11 @@ def query_image(image, query):
 
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
         logger.debug(f"Using device {device} for generating response.")
-        response = generate_minicpm_response(prompt, image_path, device)
+        response = generate_minicpm_response(prompt, [image_path], device)  # Pass as a list
 
         return {
             "results": serializable_results,
-            "answer": response["answer"],
+            "answer": "\n".join(response["answers"]),
             "tokens_consumed": response["tokens_consumed"]
         }
     except Exception as e:
