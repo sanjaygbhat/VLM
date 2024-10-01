@@ -49,12 +49,12 @@ def initialize_model(rank, world_size):
         logger.debug(f"Process {rank}: Available config attributes: {config_attrs}")
 
         # Correctly access the transformer layers
-        if hasattr(config, 'llm') and hasattr(config.llm, 'model'):
-            total_layers = len(config.llm.model.layers)
+        if hasattr(config, 'num_hidden_layers'):
+            total_layers = config.num_hidden_layers
             logger.info(f"Process {rank}: Total transformer layers found: {total_layers}")
         else:
-            logger.error(f"Process {rank}: 'MiniCPMVConfig' does not have 'llm.model.layers'")
-            raise AttributeError("'MiniCPMVConfig' does not have 'llm.model.layers'")
+            logger.error(f"Process {rank}: 'MiniCPMVConfig' does not have 'num_hidden_layers'")
+            raise AttributeError("'MiniCPMVConfig' does not have 'num_hidden_layers'")
 
         # Calculate layers per GPU
         layers_per_gpu = total_layers // world_size
@@ -64,10 +64,10 @@ def initialize_model(rank, world_size):
 
         # Create device_map based on the correct attribute
         device_map = {
-            f"llm.model.layers.{i}": rank for i in range(start_layer, end_layer)
+            f"layers.{i}": rank for i in range(start_layer, end_layer)
         }
-        device_map["llm.model.embed_tokens"] = 0  # Assign embedding layer to GPU 0
-        device_map["llm.model.norm"] = world_size - 1
+        device_map["embed_tokens"] = 0  # Assign embedding layer to GPU 0
+        device_map["norm"] = world_size - 1
         device_map["lm_head"] = world_size - 1
 
         logger.debug(f"Process {rank}: Device map: {device_map}")
@@ -102,50 +102,29 @@ def initialize_model(rank, world_size):
         logger.error(f"Process {rank}: Failed to initialize model - {e}", exc_info=True)
         raise
 
-def cleanup():
-    dist.destroy_process_group()
-    logger.debug("Destroyed distributed process group.")
-
 def run_app(rank, world_size):
-    try:
-        setup(rank, world_size)
-        torch.cuda.set_device(rank)
-        logger.debug(f"Process {rank}: Set CUDA device to {rank}.")
+    setup(rank, world_size)
+    model, tokenizer, image_processor = initialize_model(rank, world_size)
+    
+    # Create and configure Flask app
+    from app import create_app  # Ensure create_app is defined in app/__init__.py
 
-        logger.info(f"Process {rank}: Before model initialization")
-        log_gpu_memory()
+    app = create_app()
+    app.config['RANK'] = rank
+    app.config['WORLD_SIZE'] = world_size
+    app.config['MODEL'] = model
+    app.config['TOKENIZER'] = tokenizer
+    app.config['IMAGE_PROCESSOR'] = image_processor
 
-        model, tokenizer, image_processor = initialize_model(rank, world_size)
+    # Initialize RAG and add to app.config
+    RAG = initialize_rag(rank, world_size)
+    app.config['RAG'] = RAG
+    logger.debug(f"Process {rank}: RAG model initialized and added to app config.")
 
-        logger.info(f"Process {rank}: After model initialization")
-        log_gpu_memory()
-
-        # Initialize CUDA
-        torch.cuda.empty_cache()
-        logger.debug(f"Process {rank}: Cleared CUDA cache.")
-
-        # Create and configure Flask app
-        from app import create_app  # Ensure create_app is defined in app/__init__.py
-
-        app = create_app()
-        app.config['RANK'] = rank
-        app.config['WORLD_SIZE'] = world_size
-        app.config['MODEL'] = model
-        app.config['TOKENIZER'] = tokenizer
-        app.config['IMAGE_PROCESSOR'] = image_processor
-
-        # Initialize RAG and add to app.config
-        RAG = initialize_rag(rank, world_size)
-        app.config['RAG'] = RAG
-        logger.debug(f"Process {rank}: RAG model initialized and added to app config.")
-
-        app.run(host='0.0.0.0', port=5000 + rank)
-        logger.info(f"Process {rank}: Flask app running on port {5000 + rank}.")
-
-    except Exception as e:
-        logger.error(f"Error in process {rank}: {e}", exc_info=True)
-    finally:
-        cleanup()
+    # Run the Flask app
+    port = 5000 + rank
+    app.run(host='0.0.0.0', port=port)
+    logger.info(f"Process {rank}: Flask app running on port {port}.")
 
 def main():
     mp.set_start_method('spawn', force=True)

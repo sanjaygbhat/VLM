@@ -6,7 +6,7 @@ import logging
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Set to DEBUG for detailed logging
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -25,9 +25,6 @@ def generate_minicpm_response(prompt, image_path, device):
             add_generation_prompt=True
         )
 
-        logger.debug("Tokenizing the input prompt.")
-        inputs = tokenizer(minicpm_prompt, return_tensors="pt").to(device)
-
         # Initialize pixel_values as None
         pixel_values = None
 
@@ -42,27 +39,24 @@ def generate_minicpm_response(prompt, image_path, device):
             logger.debug("No image provided. Creating dummy pixel_values.")
             pixel_values = torch.zeros((1, 3, 224, 224), device=device)
 
+        # Proceed with generating the response using the model
         logger.debug("Generating response with MiniCPM.")
         with torch.no_grad():
             outputs = model.generate(
-                input_ids=inputs.input_ids,
+                input_ids=minicpm_prompt['input_ids'].to(device),
+                attention_mask=minicpm_prompt['attention_mask'].to(device),
                 pixel_values=pixel_values,
-                max_new_tokens=256,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.95,
+                max_length=current_app.config.get('MAX_LENGTH', 20),
+                do_sample=current_app.config.get('DO_SAMPLE', False),
+                num_beams=current_app.config.get('NUM_BEAMS', 1),
+                early_stopping=current_app.config.get('EARLY_STOPPING', False)
             )
 
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        logger.debug("Response generated successfully.")
+        logger.debug("Response generation complete.")
 
         return {
-            "answer": response,
-            "tokens_consumed": {
-                "prompt_tokens": len(inputs.input_ids[0]),
-                "completion_tokens": len(outputs[0]) - len(inputs.input_ids[0]),
-                "total_tokens": len(outputs[0])
-            }
+            "response": response
         }
     except Exception as e:
         logger.error(f"Error in generate_minicpm_response: {str(e)}", exc_info=True)

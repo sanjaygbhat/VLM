@@ -35,7 +35,7 @@ def initialize_llm(rank, world_size):
             MODEL_NAME,
             trust_remote_code=True,
             torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32,
-            device_map={"llm.model.layers": device.index}  # Placeholder, managed in run.py
+            device_map=None  # Device mapping handled in run.py
         )
         model.to(device)  # Ensure model is moved to the device
         logger.debug(f"Process {rank}: LLM model moved to {device}.")
