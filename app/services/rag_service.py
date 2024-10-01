@@ -7,6 +7,7 @@ import tempfile
 from base64 import b64decode
 from io import BytesIO
 import os
+from byaldi import RAGMultiModalModel
 
 # Configure logging
 logging.basicConfig(
@@ -117,53 +118,41 @@ def query_document(doc_id, query, k=3):
 
         index_path = document_indices[doc_id]
         logger.info(f"Loading index from path: {index_path}")
-        RAG_specific = current_app.config['RAG'].from_index(index_path)
+        RAG_specific = RAGMultiModalModel.from_index(index_path)
 
         logger.info(f"Performing search with query: {query}")
         results = RAG_specific.search(query, k=k)
 
-        serializable_results = [
-            {
+        # Process the results
+        serializable_results = []
+        image_paths = []
+        for i, result in enumerate(results):
+            serializable_result = {
                 "doc_id": result.doc_id,
                 "page_num": result.page_num,
                 "score": result.score,
                 "metadata": result.metadata,
-                "base64": result.base64
-            } for result in results
-        ]
-
-        # Extract images from the top k results
-        image_paths = []
-        temp_files = []
-
-        for i, res in enumerate(serializable_results):
-            if res.get('base64'):
+            }
+            
+            # Handle image data if present
+            if result.base64:
                 try:
-                    image_data = b64decode(res['base64'])
-                    image = Image.open(BytesIO(image_data)).convert("RGB")
+                    # Decode base64 image
+                    image_data = base64.b64decode(result.base64)
+                    image = Image.open(io.BytesIO(image_data))
+                    
+                    # Save image to a temporary file
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+                        image.save(temp_file, format='JPEG')
+                        image_paths.append(temp_file.name)
+                    
+                    serializable_result["image_path"] = temp_file.name
                 except Exception as img_e:
-                    logger.error(f"Failed to decode image for result {i}: {img_e}")
-                    continue
+                    logger.error(f"Failed to process image for result {i}: {str(img_e)}")
+            
+            serializable_results.append(serializable_result)
 
-                # Save to a temporary file
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
-                try:
-                    image.save(temp_file.name)
-                    image_paths.append(temp_file.name)
-                    temp_files.append(temp_file.name)  # Keep track for cleanup
-                    logger.debug(f"Saved image for result {i} to {temp_file.name}")
-                except Exception as save_e:
-                    logger.error(f"Failed to save image for result {i}: {save_e}")
-                    temp_file.close()
-                    os.unlink(temp_file.name)
-            else:
-                logger.warning(f"Result {i} has no 'base64' image data.")
-
-        if not image_paths:
-            logger.error("No images found in the top results.")
-            raise ValueError("No images available for the given query.")
-
-        # Build context from metadata
+        # Generate context from metadata
         context = "\n".join([f"Excerpt {i+1}:\n{result['metadata']}" for i, result in enumerate(serializable_results)])
 
         prompt = f"Based on the following excerpts and images, please answer this question: {query}\n\n{context}"
@@ -175,25 +164,19 @@ def query_document(doc_id, query, k=3):
         response = generate_minicpm_response(prompt, image_paths, device)
 
         # Clean up temporary image files
-        for path in temp_files:
+        for path in image_paths:
             try:
                 os.unlink(path)
                 logger.debug(f"Deleted temporary image file: {path}")
             except Exception as del_e:
                 logger.warning(f"Failed to delete temporary image file {path}: {del_e}")
 
-        # Aggregate answers if multiple
-        if len(response['answers']) == 1:
-            answer = response['answers'][0]
-        else:
-            # Example aggregation: concatenate all answers
-            answer = "\n".join(response['answers'])
-
         return {
             "results": serializable_results,
-            "answer": answer,
+            "answer": response["answer"],
             "tokens_consumed": response["tokens_consumed"]
         }
+
     except Exception as e:
         logger.error(f"Error in query_document: {str(e)}", exc_info=True)
         raise

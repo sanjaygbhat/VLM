@@ -72,6 +72,8 @@ def upload_document(file, user_id):
         )
     except Exception as e:
         logger.error(f"Indexing failed: {e}")
+        db.session.delete(document)
+        db.session.commit()
         return None
     indexing_time = time.time() - start_time
     logger.info(f"Step 5: Indexing took {indexing_time:.2f} seconds")
@@ -84,6 +86,8 @@ def upload_document(file, user_id):
         logger.info(f"Moved index from {byaldi_index_path} to {index_path}")
     else:
         logger.error(f"Index not found at {byaldi_index_path}")
+        db.session.delete(document)
+        db.session.commit()
         return None
     logger.info(f"Step 6: Moving index took {time.time() - start_time:.2f} seconds")
 
