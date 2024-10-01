@@ -35,7 +35,7 @@ def initialize_model(rank, world_size):
         end_layer = start_layer + layers_per_gpu if rank != world_size - 1 else total_layers
 
         device_map = {f"transformer.layers.{i}": rank for i in range(start_layer, end_layer)}
-        device_map["transformer.embedding"] = 0
+        device_map["transformer.embed_tokens"] = 0  # Corrected mapping
         device_map["transformer.norm"] = world_size - 1
         device_map["lm_head"] = world_size - 1
 
