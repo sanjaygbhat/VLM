@@ -48,10 +48,7 @@ def generate_minicpm_response(prompt, image_paths, device):
                 # Process all images together
                 processed = image_processor(images, return_tensors="pt")
                 logger.debug(f"Processed image_processor output keys: {processed.keys()}")
-
-                # Log the types of each key in processed
-                for key, value in processed.items():
-                    logger.debug(f"Processed key: {key}, Type: {type(value)}, Shape: {value.shape if isinstance(value, torch.Tensor) else 'N/A'}")
+                logger.debug(f"Processed image_processor output types: {[type(v) for v in processed.values()]}")
 
                 pixel_values = processed.get('pixel_values', None)
 
@@ -60,7 +57,7 @@ def generate_minicpm_response(prompt, image_paths, device):
                     raise ValueError("Image processing failed: 'pixel_values' not found.")
 
                 logger.debug(f"Raw pixel_values type: {type(pixel_values)}")
-                logger.debug(f"Raw pixel_values shape: {pixel_values.shape if isinstance(pixel_values, torch.Tensor) else 'Unknown'}")
+                logger.debug(f"Raw pixel_values shape: {pixel_values.shape if isinstance(pixel_values, torch.Tensor) else [v.shape for v in pixel_values] if isinstance(pixel_values, list) else 'Unknown'}")
 
                 # Ensure pixel_values is a tensor
                 if isinstance(pixel_values, list):
@@ -71,11 +68,17 @@ def generate_minicpm_response(prompt, image_paths, device):
                         logger.error(f"Failed to stack 'pixel_values' list into tensor: {str(stack_e)}")
                         logger.error(f"pixel_values list content: {[type(v) for v in pixel_values]}")
                         raise
+                elif isinstance(pixel_values, torch.Tensor):
+                    pixel_values = pixel_values.to(device)
+                    logger.debug(f"pixel_values is already a tensor. Shape: {pixel_values.shape}")
+                else:
+                    logger.error(f"Unexpected type for pixel_values: {type(pixel_values)}")
+                    raise TypeError(f"Unexpected type for pixel_values: {type(pixel_values)}")
 
                 logger.debug(f"Final pixel_values shape: {pixel_values.shape}")
-
-            except Exception as img_process_e:
-                logger.error(f"Failed to process images: {str(img_process_e)}")
+                logger.debug(f"Final pixel_values device: {pixel_values.device}")
+            except Exception as img_proc_e:
+                logger.error(f"Failed to process images: {str(img_proc_e)}")
                 pixel_values = None
         else:
             pixel_values = None
@@ -117,6 +120,81 @@ def generate_minicpm_response(prompt, image_paths, device):
         logger.error(f"Error in generate_minicpm_response: {str(e)}", exc_info=True)
         raise
 
+def query_document(doc_id, query, k=3):
+    try:
+        document_indices = load_document_indices()
+        if doc_id not in document_indices:
+            raise ValueError(f"Invalid document_id: {doc_id}")
+
+        index_path = document_indices[doc_id]
+        logger.info(f"Loading index from path: {index_path}")
+        
+        # Use the RAG model from app config
+        RAG = current_app.config['RAG']
+        RAG_specific = RAG.from_index(index_path)
+
+        logger.info(f"Performing search with query: {query}")
+        results = RAG_specific.search(query, k=k)
+
+        # Process the results
+        serializable_results = []
+        image_paths = []
+        for i, result in enumerate(results):
+            serializable_result = {
+                "doc_id": result.doc_id,
+                "page_num": result.page_num,
+                "score": result.score,
+                "metadata": result.metadata,
+                # "base64": result.base64  # Optional: Include if needed
+            }
+            
+            # Handle image data if present
+            if result.base64:
+                try:
+                    # Decode base64 image
+                    image_data = base64.b64decode(result.base64)
+                    image = Image.open(BytesIO(image_data)).convert("RGB")
+                    
+                    # Save image to a temporary file
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+                        image.save(temp_file, format='JPEG')
+                        image_paths.append(temp_file.name)
+                    
+                    serializable_result["image_path"] = temp_file.name
+                except Exception as img_e:
+                    logger.error(f"Failed to process image for result {i}: {str(img_e)}")
+            
+            serializable_results.append(serializable_result)
+
+        # Generate context from metadata
+        context = "\n".join([f"Excerpt {i+1}:\n{result['metadata']}" for i, result in enumerate(serializable_results)])
+
+        prompt = f"Based on the following excerpts and images, please answer this question: {query}\n\n{context}"
+
+        device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
+        logger.debug(f"Using device {device} for generating response.")
+
+        # Generate the response with image_paths
+        response = generate_minicpm_response(prompt, image_paths, device)
+
+        # Clean up temporary image files
+        for path in image_paths:
+            try:
+                os.unlink(path)
+                logger.debug(f"Deleted temporary image file: {path}")
+            except Exception as del_e:
+                logger.warning(f"Failed to delete temporary image file {path}: {del_e}")
+
+        return {
+            "results": serializable_results,
+            "answer": response["answer"],  # Corrected key
+            "tokens_consumed": response["tokens_consumed"]
+        }
+
+    except Exception as e:
+        logger.error(f"Error in query_document: {str(e)}", exc_info=True)
+        raise
+
 def query_image(image, query, user_id):
     try:
         # Save the image temporarily
@@ -151,7 +229,6 @@ def query_image(image, query, user_id):
 
         # Clean up the temporary file
         os.unlink(image_path)
-        logger.debug(f"Deleted temporary image file: {image_path}")
 
         return {
             "results": serializable_results,
