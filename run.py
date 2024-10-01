@@ -28,7 +28,7 @@ def setup(rank, world_size):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     logger.debug(f"Process {rank}: Initialized distributed process group.")
 
-def generate_device_map(model, rank, world_size):
+def generate_device_map(model, world_size, rank):
     """
     Dynamically generates a device map based on the model's named modules.
     Assigns transformer layers evenly across available GPUs and maps other modules appropriately.
@@ -53,17 +53,20 @@ def generate_device_map(model, rank, world_size):
     for gpu in range(world_size):
         # Distribute extra layers to the first few GPUs
         end_layer = start_layer + layers_per_gpu + (1 if gpu < extra_layers else 0)
-        for layer in layers[start_layer:end_layer]:
+        assigned_layers = layers[start_layer:end_layer]
+        for layer in assigned_layers:
             device_map[layer] = gpu
-        logger.debug(f"GPU {gpu}: Assigned layers {start_layer} to {end_layer - 1}")
+        logger.debug(f"GPU {gpu}: Assigned layers {start_layer} to {end_layer - 1} ({len(assigned_layers)} layers)")
         start_layer = end_layer
 
     # Assign non-layer modules to specific GPUs
-    # For simplicity, map 'llm.model.embed_tokens' to GPU 0,
-    # 'llm.model.norm' and 'llm.model.lm_head' to the last GPU
-    device_map["llm.model.embed_tokens"] = 0
-    device_map["llm.model.norm"] = world_size - 1
-    device_map["llm.model.lm_head"] = world_size - 1
+    non_layer_modules = ['llm.model.embed_tokens', 'llm.model.norm', 'llm.model.lm_head']
+    for module in non_layer_modules:
+        if module == 'llm.model.embed_tokens':
+            device_map[module] = 0  # Assign to first GPU
+        else:
+            device_map[module] = world_size - 1  # Assign to last GPU
+    logger.debug(f"Process {rank}: Assigned non-layer modules to GPUs: {non_layer_modules}")
 
     logger.debug(f"Process {rank}: Device map assignments: {device_map}")
 
@@ -75,38 +78,27 @@ def initialize_model(rank, world_size):
         dtype = torch.float16 if torch.cuda.is_available() else torch.float32
         logger.debug(f"Process {rank}: Using dtype {dtype}.")
 
-        # Initial model loading to inspect module names
+        # Load the model without device mapping to inspect modules
+        logger.debug(f"Process {rank}: Loading model for device map generation...")
         model = AutoModelForCausalLM.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
-            torch_dtype=dtype,
-            device_map=None,  # Initial load without device mapping
             trust_remote_code=True,
+            torch_dtype=dtype,
+            device_map=None,  # Initially load without device mapping
             low_cpu_mem_usage=True,
         )
-        config = model.config
-        logger.debug(f"Process {rank}: Loaded model and configuration.")
+        logger.debug(f"Process {rank}: Model loaded without device mapping.")
 
-        # Log all available attributes in the configuration
-        config_attrs = dir(config)
-        logger.debug(f"Process {rank}: Available config attributes: {config_attrs}")
+        # Generate dynamic device map
+        device_map = generate_device_map(model, world_size, rank)
 
-        # Ensure 'num_hidden_layers' exists
-        if hasattr(config, 'num_hidden_layers'):
-            total_layers = config.num_hidden_layers
-            logger.info(f"Process {rank}: Total transformer layers found: {total_layers}")
-        else:
-            logger.error(f"Process {rank}: 'MiniCPMVConfig' does not have 'num_hidden_layers'")
-            raise AttributeError("'MiniCPMVConfig' does not have 'num_hidden_layers'")
-
-        # Generate device_map dynamically
-        device_map = generate_device_map(model, rank, world_size)
-
-        # Reload the model with the device_map
+        # Reload the model with the generated device_map
+        logger.debug(f"Process {rank}: Reloading model with device map...")
         model = AutoModelForCausalLM.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
+            trust_remote_code=True,
             torch_dtype=dtype,
             device_map=device_map,
-            trust_remote_code=True,
             low_cpu_mem_usage=True,
         )
         logger.info(f"Process {rank}: Model loaded with device mapping.")
@@ -123,8 +115,10 @@ def initialize_model(rank, world_size):
         logger.info(f"Process {rank}: Tokenizer and image processor initialized.")
 
         # Log all module names to verify device mapping
+        logger.debug(f"Process {rank}: Listing all module names and their devices:")
         for name, module in model.named_modules():
-            logger.debug(f"Process {rank}: Module Name: {name}")
+            device = next(module.parameters()).device if any(p.requires_grad for p in module.parameters()) else 'cpu'
+            logger.debug(f"Module: {name}, Device: {device}")
 
         return model, tokenizer, image_processor
 
@@ -162,7 +156,7 @@ def main():
     if world_size < 1:
         logger.error("No GPUs available. Exiting.")
         sys.exit(1)
-    logger.info(f"Starting application with {world_size} GPUs.")
+    logger.info(f"Starting application with {world_size} GPU(s).")
     mp.spawn(run_app, args=(world_size,), nprocs=world_size, join=True)
 
 if __name__ == '__main__':
