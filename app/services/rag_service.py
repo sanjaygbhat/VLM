@@ -49,7 +49,7 @@ def generate_minicpm_response(prompt, image_paths, device):
                 logger.error("Image processor did not return 'pixel_values'. Available keys: {}".format(processed.keys()))
                 raise ValueError("Image processing failed: 'pixel_values' not found.")
             pixel_values = processed['pixel_values'].to(device)
-            logger.debug(f"Processed pixel_values type: {type(processed['pixel_values'])}")
+            logger.debug(f"Processed pixel_values type: {type(pixel_values)}")
         else:
             pixel_values = None  # Handle cases with no images if applicable
 
