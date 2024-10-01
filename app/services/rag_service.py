@@ -12,6 +12,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def generate_minicpm_response(prompt, image_path, device):
+    """
+    Generates a response using the MiniCPM model based on the given prompt and image.
+
+    Args:
+        prompt (str): The text prompt to generate a response for.
+        image_path (str or None): Path to an image to include in the prompt (if applicable).
+        device (torch.device): The device to run the model on.
+
+    Returns:
+        dict: A dictionary containing the generated answer and tokens consumed.
+    """
     try:
         tokenizer = current_app.config['TOKENIZER']
         model = current_app.config['MODEL']
@@ -39,27 +50,32 @@ def generate_minicpm_response(prompt, image_path, device):
             logger.debug("No image provided. Creating dummy pixel_values.")
             pixel_values = torch.zeros((1, 3, 224, 224), device=device)
 
-        # Proceed with generating the response using the model
-        logger.debug("Generating response with MiniCPM.")
-        with torch.no_grad():
-            outputs = model.generate(
-                input_ids=minicpm_prompt['input_ids'].to(device),
-                attention_mask=minicpm_prompt['attention_mask'].to(device),
-                pixel_values=pixel_values,
-                max_length=current_app.config.get('MAX_LENGTH', 20),
-                do_sample=current_app.config.get('DO_SAMPLE', False),
-                num_beams=current_app.config.get('NUM_BEAMS', 1),
-                early_stopping=current_app.config.get('EARLY_STOPPING', False)
-            )
+        # Tokenize the prompt
+        minicpm_prompt = tokenizer(prompt, return_tensors='pt').to(device)
 
-        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        logger.debug("Response generation complete.")
+        # Generate the response
+        outputs = model.generate(
+            input_ids=minicpm_prompt['input_ids'],
+            attention_mask=minicpm_prompt['attention_mask'],
+            max_length=512,
+            num_return_sequences=1,
+            no_repeat_ngram_size=2,
+            early_stopping=True
+        )
+
+        # Decode the generated tokens to string
+        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Calculate tokens consumed
+        tokens_consumed = minicpm_prompt['input_ids'].size(1)
 
         return {
-            "response": response
+            "answer": answer,
+            "tokens_consumed": tokens_consumed
         }
+
     except Exception as e:
-        logger.error(f"Error in generate_minicpm_response: {str(e)}", exc_info=True)
+        logger.error(f"Error in generate_minicpm_response: {e}", exc_info=True)
         raise
 
 def query_document(doc_id, query, k=3):
@@ -90,6 +106,8 @@ def query_document(doc_id, query, k=3):
 
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
         logger.debug(f"Using device {device} for generating response.")
+        
+        # Generate the response
         response = generate_minicpm_response(prompt, None, device)  # Pass None for image_path
 
         return {
