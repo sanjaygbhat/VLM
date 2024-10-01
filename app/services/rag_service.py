@@ -1,175 +1,144 @@
-from flask import current_app
-from PIL import Image
-import torch
-from app.utils.helpers import load_document_indices
+import time
 import logging
-import tempfile
-import base64
-from io import BytesIO
 import os
+import uuid
+import hashlib
+from werkzeug.utils import secure_filename
+from app import Config, db
+from app.utils.helpers import load_document_indices, save_document_indices
+from app.models.document import Document
+from flask import current_app
 from byaldi import RAGMultiModalModel
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def generate_minicpm_response(prompt, image_paths):
+def get_file_hash(file_path):
+    """Calculate SHA256 hash of file contents from a file path"""
+    start_time = time.time()
+    hasher = hashlib.sha256()
+    with open(file_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hasher.update(chunk)
+    hash_time = time.time() - start_time
+    logger.info(f"File hash calculation took {hash_time:.2f} seconds")
+    return hasher.hexdigest()
+
+def upload_document(file, user_id):
+    start_time = time.time()
+    
     try:
-        tokenizer = current_app.config['TOKENIZER']
-        model = current_app.config['MODEL']
-        image_processor = current_app.config['IMAGE_PROCESSOR']
-        RAG = current_app.config['RAG']
-        device = current_app.config['DEVICE']
-        
-        logger.debug("Preparing the prompt for MiniCPM.")
+        # Step 1: Save the file
+        filename = secure_filename(file.filename)
+        doc_id = str(uuid.uuid4())
+        file_path = os.path.join(Config.UPLOAD_FOLDER, f"{doc_id}_{filename}")
+        file.save(file_path)
+        logger.info(f"Step 1: File saving took {time.time() - start_time:.2f} seconds")
 
-        # Tokenize the prompt
-        tokens = tokenizer(prompt, return_tensors='pt')
-        input_ids = tokens['input_ids'].to(device)
-        attention_mask = tokens['attention_mask'].to(device)
+        # Step 2: Calculate file hash
+        start_time = time.time()
+        file_hash = get_file_hash(file_path)
+        logger.info(f"Step 2: File hashing took {time.time() - start_time:.2f} seconds")
 
-        # Process images using the MiniCPMVImageProcessor
-        images = [Image.open(path).convert('RGB') for path in image_paths]
-        processed_images = image_processor(images, return_tensors="pt")
-        
-        # Check if pixel_values is a list or tensor and handle accordingly
-        if isinstance(processed_images['pixel_values'], list):
-            pixel_values = torch.stack(processed_images['pixel_values']).to(device)
+        # Optional Step: Check for duplicate file_hash
+        existing_document = Document.query.filter_by(file_hash=file_hash).first()
+        if existing_document:
+            logger.info(f"Duplicate file detected: {existing_document.id}")
+            return existing_document.id, 0  # Assuming no indexing time for duplicates
+
+        # Step 3: Create document record with file_hash
+        start_time = time.time()
+        document = Document(id=doc_id, filename=filename, file_hash=file_hash, user_id=user_id)
+        db.session.add(document)
+        db.session.commit()
+        logger.info(f"Step 3: Document record creation took {time.time() - start_time:.2f} seconds")
+
+        # Step 4: Create index name
+        start_time = time.time()
+        index_name = f"index_{doc_id}"
+        index_path = os.path.join(Config.INDEX_FOLDER, f"{index_name}.faiss")
+        logger.info(f"Step 4: Index preparation took {time.time() - start_time:.2f} seconds")
+
+        # Step 5: Indexing using RAG
+        start_time = time.time()
+        try:
+            # Initialize RAG model from app config
+            RAG = current_app.config['RAG']
+            # Index the document
+            RAG.index(
+                input_path=file_path,
+                index_name=index_name,
+                store_collection_with_index=True,
+                overwrite=True
+            )
+        except Exception as e:
+            logger.error(f"Indexing failed: {e}")
+            db.session.delete(document)
+            db.session.commit()
+            return None
+        indexing_time = time.time() - start_time
+        logger.info(f"Step 5: Indexing took {indexing_time:.2f} seconds")
+
+        # Step 6: Move index
+        start_time = time.time()
+        byaldi_index_path = os.path.join('.byaldi', index_name)
+        if os.path.exists(byaldi_index_path):
+            os.rename(byaldi_index_path, index_path)
+            logger.info(f"Moved index from {byaldi_index_path} to {index_path}")
         else:
-            pixel_values = processed_images['pixel_values'].to(device)
+            logger.error(f"Index not found at {byaldi_index_path}")
+            db.session.delete(document)
+            db.session.commit()
+            return None
+        logger.info(f"Step 6: Moving index took {time.time() - start_time:.2f} seconds")
 
-        logger.debug("Images have been processed and moved to the device.")
+        # Step 7: Update document indices
+        start_time = time.time()
+        document_indices = load_document_indices()
+        document_indices[doc_id] = index_path
+        save_document_indices(document_indices)
+        logger.info(f"Step 7: Updating document indices took {time.time() - start_time:.2f} seconds")
 
-        # Perform RAG search or other operations as needed
-        rag_results = RAG.search(prompt, image_paths=image_paths, k=3)
+        logger.info(f"Document {doc_id} indexed at {index_path}.")
 
-        # Formulate context and generate response
-        context = "\n".join([f"Image {i+1}:\n{result['metadata']}" for i, result in enumerate(rag_results)])
-        updated_prompt = f"Based on the following image descriptions, please answer this question: {prompt}\n\n{context}"
-        
-        # Tokenize the updated prompt
-        updated_tokens = tokenizer(updated_prompt, return_tensors='pt')
-        updated_input_ids = updated_tokens['input_ids'].to(device)
-        updated_attention_mask = updated_tokens['attention_mask'].to(device)
-
-        logger.debug(f"Updated prompt for model generation: {updated_prompt}")
-
-        # Generate response using the model
-        outputs = model.generate(
-            input_ids=updated_input_ids,
-            attention_mask=updated_attention_mask,
-            pixel_values=pixel_values,
-            max_new_tokens=150,  # Adjust as needed
-            do_sample=True,
-            top_k=50,
-            top_p=0.95,
-            temperature=0.7
-        )
-
-        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        tokens_consumed = outputs.shape[1]  # Number of tokens generated
-
-        return {
-            "answer": answer,
-            "tokens_consumed": tokens_consumed
-        }
+        return doc_id, indexing_time
 
     except Exception as e:
-        logger.error(f"Error in generate_minicpm_response: {str(e)}", exc_info=True)
-        raise
+        logger.error(f"Failed to upload and index document: {e}", exc_info=True)
+        return None
 
 def query_document(doc_id, query, k=3):
     try:
+        # Load document indices
         document_indices = load_document_indices()
-        index_path = document_indices.get(doc_id)
-        if not index_path:
-            raise ValueError(f"No index found for document {doc_id}")
+        
+        if doc_id not in document_indices:
+            logger.error(f"Document ID {doc_id} not found in indices.")
+            raise ValueError("Document not found.")
 
-        logger.info(f"Index path for document {doc_id}: {index_path}")
+        index_path = document_indices[doc_id]
+        
         if not os.path.exists(index_path):
-            raise FileNotFoundError(f"Index file not found at {index_path}")
-        
-        logger.info(f"Index file size: {os.path.getsize(index_path)}")
+            logger.error(f"Index file {index_path} does not exist.")
+            raise ValueError("Index file not found.")
 
-        # Initialize the RAG model with the correct index
-        logger.info("Initializing RAG model with the index")
-        RAG = RAGMultiModalModel.from_index(index_path)
-        
+        # Initialize a new RAG instance for the specific document
+        RAG = RAGMultiModalModel.from_index(
+            index_path,
+            model_name="vidore/colpali-v1.2",  # Replace with your actual model
+            device=current_app.config['DEVICE']
+        )
+        logger.debug(f"RAG model initialized with index {index_path} for doc_id {doc_id}.")
+
         # Perform the search
-        logger.info(f"Performing search with query: {query}")
         rag_results = RAG.search(query, k=k)
-        
-        # Log the number of results
-        logger.info(f"Number of results returned by byaldi: {len(rag_results)}")
 
+        if not rag_results:
+            logger.error("No passages provided")
+            raise ValueError("No passages provided")
+        
         # Process results
-        image_paths = []
-        serializable_results = []
-        for i, result in enumerate(rag_results):
-            logger.info(f"Result {i+1}:")
-            logger.info(f"  Doc ID: {result.doc_id}")
-            logger.info(f"  Page Number: {result.page_num}")
-            logger.info(f"  Score: {result.score}")
-            logger.info(f"  Metadata: {result.metadata}")
-            
-            # Check if there's an image associated with this result
-            if hasattr(result, 'base64') and result.base64:
-                logger.info(f"  Image found for result {i+1}")
-                # Save image to a temporary file
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_image:
-                    image_data = base64.b64decode(result.base64)
-                    temp_image.write(image_data)
-                    image_paths.append(temp_image.name)
-                logger.info(f"  Image saved to: {temp_image.name}")
-            else:
-                logger.info(f"  No image found for result {i+1}")
-
-            serializable_results.append({
-                "doc_id": result.doc_id,
-                "page_num": result.page_num,
-                "score": result.score,
-                "metadata": result.metadata,
-                "has_image": hasattr(result, 'base64') and bool(result.base64)
-            })
-
-        logger.info(f"Total number of images found: {len(image_paths)}")
-
-        # Generate context and prompt
-        context = "\n".join([f"Result {i+1}:\n{result['metadata']}" for i, result in enumerate(serializable_results)])
-        prompt = f"Based on the following search results, please answer this question: {query}\n\n{context}"
-
-        # Generate response
-        device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
-        response = generate_minicpm_response(prompt, image_paths)
-
-        return {
-            "results": serializable_results,
-            "answer": response["answer"],
-            "tokens_consumed": response["tokens_consumed"]
-        }
-
-    except Exception as e:
-        logger.error(f"Error in query_document: {str(e)}", exc_info=True)
-        raise
-
-def query_image(image, query, user_id):
-    try:
-        # Save the image temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_image:
-            image.save(temp_image.name)
-            image_path = temp_image.name
-
-        logger.info(f"Saved image to temporary path: {image_path}")
-
-        # Initialize RAG model from app config
-        RAG = current_app.config['RAG']
-        
-        # Perform the search
-        rag_results = RAG.search(query, image_paths=[image_path], k=3)
-
         serializable_results = [
             {
                 "doc_id": result.doc_id,
@@ -180,19 +149,11 @@ def query_image(image, query, user_id):
             } for result in rag_results
         ]
 
-        context = "\n".join([f"Image {i+1}:\n{result['metadata']}" for i, result in enumerate(serializable_results)])
-        prompt = f"Based on the following image descriptions, please answer this question: {query}\n\n{context}"
+        return serializable_results
 
-        device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
-        logger.debug(f"Using device {device} for generating response.")
-        response = generate_minicpm_response(prompt, [image_path])
-
-        return {
-            "results": serializable_results,
-            "answer": response["answer"],
-            "tokens_consumed": response["tokens_consumed"]
-        }
-
+    except ValueError as ve:
+        logger.error(f"ValueError in query_document: {ve}")
+        raise ve
     except Exception as e:
-        logger.error(f"Error in query_image: {str(e)}", exc_info=True)
-        raise
+        logger.error(f"Unexpected error in query_document: {e}", exc_info=True)
+        raise e
