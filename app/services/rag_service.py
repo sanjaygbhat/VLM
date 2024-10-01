@@ -71,12 +71,18 @@ def query_document(doc_id, query, k=3):
         if not index_path:
             raise ValueError(f"No index found for document {doc_id}")
 
-        # Initialize RAG model from app config
-        RAG = current_app.config['RAG']
+        logger.info(f"Index path for document {doc_id}: {index_path}")
+        if not os.path.exists(index_path):
+            raise FileNotFoundError(f"Index file not found at {index_path}")
+        
+        logger.info(f"Index file size: {os.path.getsize(index_path)}")
+
+        # Initialize a new RAG model instance for this query
+        logger.info("Initializing new RAG model instance with the index")
+        RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2", index_path=index_path)
         
         # Perform the search
         logger.info(f"Performing search with query: {query}")
-        # Remove the index_name parameter
         rag_results = RAG.search(query, k=k)
         
         # Log the number of results
