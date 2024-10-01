@@ -17,9 +17,7 @@ class Config:
     UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
     INDEX_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'indices')
     DOCUMENT_INDEX_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'document_indices.json')
+    DEVICE = device
+    IMAGE_PROCESSOR = ImageProcessor(device)
     
-    config = {
-        'DEVICE': device,
-        'IMAGE_PROCESSOR': ImageProcessor(device)
-    }
 
