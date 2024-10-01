@@ -50,70 +50,40 @@ def generate_device_map(model, world_size, rank):
     layers_per_gpu = total_layers // world_size
     extra_layers = total_layers % world_size
 
-    start_layer = 0
-    for gpu in range(world_size):
-        # Distribute extra layers to the first few GPUs
-        end_layer = start_layer + layers_per_gpu + (1 if gpu < extra_layers else 0)
-        assigned_layers = layers[start_layer:end_layer]
-        for layer in assigned_layers:
-            device_map[layer] = gpu
-        logger.debug(f"GPU {gpu}: Assigned layers {start_layer} to {end_layer - 1} ({len(assigned_layers)} layers)")
-        start_layer = end_layer
+    current_layer = 0
+    for device_rank in range(world_size):
+        num_layers = layers_per_gpu + (1 if device_rank < extra_layers else 0)
+        assigned_layers = layers[current_layer:current_layer + num_layers]
+        for layer_name in assigned_layers:
+            device_map[layer_name] = f'cuda:{device_rank}'
+        current_layer += num_layers
 
-    # Assign non-layer modules to specific GPUs
-    non_layer_modules = ['llm.model.embed_tokens', 'llm.model.norm', 'llm.model.lm_head']
-    for module in non_layer_modules:
-        if module == 'llm.model.embed_tokens':
-            device_map[module] = 0  # Assign to first GPU
-        else:
-            device_map[module] = world_size - 1  # Assign to last GPU
-    logger.debug(f"Process {rank}: Assigned non-layer modules to GPUs: {non_layer_modules}")
-
-    logger.debug(f"Process {rank}: Device map assignments: {device_map}")
-
+    logger.info(f"Process {rank}: Device map generated.")
     return device_map
 
 def initialize_model(rank, world_size):
+    MODEL_NAME = "openbmb/MiniCPM-V-2_6"
+
     device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Process {rank}: Using device {device}")
 
     try:
-        # Load the model with CPU memory optimization
         model = AutoModelForCausalLM.from_pretrained(
-            "openbmb/MiniCPM-V-2_6",
+            MODEL_NAME,
+            trust_remote_code=True,
             torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32,
-            load_in_8bit=False,
-            low_cpu_mem_usage=True,
-            trust_remote_code=True
+            device_map=generate_device_map(AutoModelForCausalLM.from_pretrained(MODEL_NAME, trust_remote_code=True), world_size, rank)
         )
+        model.to(device)
+        logger.debug(f"Process {rank}: LLM model moved to {device}.")
 
-        # Generate a custom device map
-        device_map = generate_device_map(model, world_size, rank)
-        logger.debug(f"Process {rank}: Custom device map created.")
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+        logger.debug(f"Process {rank}: Tokenizer initialized.")
 
-        # Move each module to the appropriate device
-        for module_name, gpu_id in device_map.items():
-            module = dict(model.named_modules()).get(module_name)
-            if module is not None:
-                module.to(f'cuda:{gpu_id}')
-                logger.debug(f"Process {rank}: Moved {module_name} to cuda:{gpu_id}")
-            else:
-                logger.warning(f"Process {rank}: Module {module_name} not found in the model.")
+        # Initialize the Image Processor
+        image_processor = AutoImageProcessor.from_pretrained(MODEL_NAME, trust_remote_code=True)
+        logger.debug(f"Process {rank}: Image processor initialized.")
 
-        logger.info(f"Process {rank}: Model layers assigned to GPUs based on custom device map.")
-        
-        tokenizer = AutoTokenizer.from_pretrained(
-            "openbmb/MiniCPM-V-2_6",
-            trust_remote_code=True
-        )
-        
-        image_processor = AutoImageProcessor.from_pretrained(
-            "openbmb/MiniCPM-V-2_6",
-            trust_remote_code=True
-        )
-        
-        logger.info(f"Process {rank}: Tokenizer and image processor initialized.")
-        
         return model, tokenizer, image_processor
 
     except Exception as e:
