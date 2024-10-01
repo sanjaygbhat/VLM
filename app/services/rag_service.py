@@ -9,6 +9,11 @@ from app.utils.helpers import load_document_indices, save_document_indices
 from app.models.document import Document
 from flask import current_app
 from byaldi import RAGMultiModalModel
+import torch
+from PIL import Image
+import tempfile
+import base64
+from io import BytesIO
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -157,3 +162,39 @@ def query_document(doc_id, query, k=3):
     except Exception as e:
         logger.error(f"Unexpected error in query_document: {e}", exc_info=True)
         raise e
+
+def query_image(image, query, user_id):
+    try:
+        # Get the model and tokenizer from the Flask app config
+        model = current_app.config['MODEL']
+        tokenizer = current_app.config['TOKENIZER']
+        device = current_app.config['DEVICE']
+
+        # Ensure the model is in evaluation mode and on the correct device
+        model = model.eval().to(device)
+
+        # Convert the image to RGB (assuming it's a file-like object)
+        pil_image = Image.open(image).convert('RGB')
+
+        # Prepare the message for the model
+        msgs = [{'role': 'user', 'content': [pil_image, query]}]
+
+        # Generate the answer
+        with torch.no_grad():
+            answer = model.chat(
+                image=None,
+                msgs=msgs,
+                tokenizer=tokenizer
+            )
+
+        # Log the successful query
+        logger.info(f"Successfully processed image query for user {user_id}")
+
+        return {
+            "answer": answer,
+            "tokens_consumed": len(tokenizer.encode(answer))  # Estimate token consumption
+        }
+
+    except Exception as e:
+        logger.error(f"Error in query_image: {str(e)}", exc_info=True)
+        raise
