@@ -39,21 +39,25 @@ def generate_minicpm_response(prompt, image_paths, device):
                 logger.error(f"Failed to open image {image_path}: {str(img_open_e)}")
 
         if images:
+            logger.debug(f"Number of images loaded: {len(images)}")
             try:
                 # Process all images together
                 processed = image_processor(images, return_tensors="pt")
+                logger.debug(f"Processed image_processor output keys: {processed.keys()}")
+
                 pixel_values = processed.get('pixel_values', None)
-                
+
                 if pixel_values is None:
-                    logger.error("Processed pixel_values is missing.")
+                    logger.error("Processed 'pixel_values' is missing.")
                     raise ValueError("Image processing failed: 'pixel_values' not found.")
 
-                # Handle pixel_values being a list or tensor
+                # Ensure pixel_values is a tensor
                 if isinstance(pixel_values, list):
                     try:
                         pixel_values = torch.stack(pixel_values).to(device)
-                        logger.debug("Converted pixel_values from list to tensor.")
+                        logger.debug("Converted 'pixel_values' from list to tensor.")
                     except Exception as stack_e:
+                        logger.error(f"Failed to stack 'pixel_values' list into tensor: {str(stack_e)}")
                         logger.error(f"Failed to stack pixel_values list into tensor: {str(stack_e)}")
                         raise
                 elif isinstance(pixel_values, torch.Tensor):

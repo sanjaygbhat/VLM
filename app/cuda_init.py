@@ -1,6 +1,6 @@
 import os
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoImageProcessor
 import logging
 
 # Configure logging
@@ -32,7 +32,7 @@ def initialize_model(rank, world_size):
             MODEL_NAME,
             trust_remote_code=True,
             torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32,
-            device_map=None
+            device_map={"": device}
         )
         model.to(device)
         logger.debug(f"Process {rank}: LLM model moved to {device}.")
@@ -40,9 +40,14 @@ def initialize_model(rank, world_size):
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
         logger.debug(f"Process {rank}: Tokenizer initialized.")
 
-        return model, tokenizer
+        # Initialize the Image Processor
+        image_processor = AutoImageProcessor.from_pretrained(MODEL_NAME, trust_remote_code=True)
+        logger.debug(f"Process {rank}: Image processor initialized.")
+
+        return model, tokenizer, image_processor
+
     except Exception as e:
-        logger.error(f"Process {rank}: Failed to initialize LLM - {e}", exc_info=True)
+        logger.error(f"Process {rank}: Failed to initialize LLM or Image Processor - {e}", exc_info=True)
         raise
 
 def cleanup():
