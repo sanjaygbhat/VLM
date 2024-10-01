@@ -33,7 +33,13 @@ def generate_minicpm_response(prompt, image_paths):
 
         # Process images using the MiniCPMVImageProcessor
         images = [Image.open(path).convert('RGB') for path in image_paths]
-        pixel_values = image_processor(images, return_tensors="pt").pixel_values.to(device)
+        processed_images = image_processor(images, return_tensors="pt")
+        
+        # Check if pixel_values is a list or tensor and handle accordingly
+        if isinstance(processed_images['pixel_values'], list):
+            pixel_values = torch.stack(processed_images['pixel_values']).to(device)
+        else:
+            pixel_values = processed_images['pixel_values'].to(device)
 
         logger.debug("Images have been processed and moved to the device.")
 
