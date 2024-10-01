@@ -22,172 +22,113 @@ def generate_minicpm_response(prompt, image_paths, device):
         model = current_app.config['MODEL']
         image_processor = current_app.config['IMAGE_PROCESSOR']
 
-        logger.debug(f"Preparing the prompt for MiniCPM. Prompt: {prompt[:100]}...")
-        logger.debug(f"Number of image paths: {len(image_paths)}")
+        logger.debug("Preparing the prompt for MiniCPM.")
 
         # Tokenize the prompt
         tokens = tokenizer(prompt, return_tensors='pt')
         input_ids = tokens['input_ids'].to(device)
         attention_mask = tokens['attention_mask'].to(device)
-        logger.debug(f"Tokenized prompt shape: {input_ids.shape}")
 
         # Process images in batch
         images = []
         for image_path in image_paths:
-            try:
-                with Image.open(image_path) as img:
-                    img_rgb = img.convert('RGB')
-                    images.append(img_rgb)
-                logger.debug(f"Loaded image from {image_path}, size: {img_rgb.size}, mode: {img_rgb.mode}")
-            except Exception as img_open_e:
-                logger.error(f"Failed to open image {image_path}: {str(img_open_e)}")
+            with Image.open(image_path) as img:
+                images.append(img)
 
         if images:
-            logger.debug(f"Number of images loaded: {len(images)}")
-            try:
-                # Process all images together
-                processed = image_processor(images, return_tensors="pt")
-                logger.debug(f"Processed image_processor output keys: {processed.keys()}")
-                logger.debug(f"Processed image_processor output types: {[type(v) for v in processed.values()]}")
-
-                pixel_values = processed.get('pixel_values', None)
-
-                if pixel_values is None:
-                    logger.error("Processed 'pixel_values' is missing.")
-                    raise ValueError("Image processing failed: 'pixel_values' not found.")
-
-                logger.debug(f"Raw pixel_values type: {type(pixel_values)}")
-                logger.debug(f"Raw pixel_values shape: {pixel_values.shape if isinstance(pixel_values, torch.Tensor) else [v.shape for v in pixel_values] if isinstance(pixel_values, list) else 'Unknown'}")
-
-                # Ensure pixel_values is a tensor
-                if isinstance(pixel_values, list):
-                    try:
-                        pixel_values = torch.stack(pixel_values).to(device)
-                        logger.debug("Converted 'pixel_values' from list to tensor.")
-                    except Exception as stack_e:
-                        logger.error(f"Failed to stack 'pixel_values' list into tensor: {str(stack_e)}")
-                        logger.error(f"pixel_values list content: {[type(v) for v in pixel_values]}")
-                        raise
-                elif isinstance(pixel_values, torch.Tensor):
-                    pixel_values = pixel_values.to(device)
-                    logger.debug(f"pixel_values is already a tensor. Shape: {pixel_values.shape}")
-                else:
-                    logger.error(f"Unexpected type for pixel_values: {type(pixel_values)}")
-                    raise TypeError(f"Unexpected type for pixel_values: {type(pixel_values)}")
-
-                logger.debug(f"Final pixel_values shape: {pixel_values.shape}")
-                logger.debug(f"Final pixel_values device: {pixel_values.device}")
-            except Exception as img_proc_e:
-                logger.error(f"Failed to process images: {str(img_proc_e)}")
-                pixel_values = None
+            # Process all images together
+            processed = image_processor(images, return_tensors="pt")
+            pixel_values = processed['pixel_values'].to(device)
+            logger.debug(f"Processed pixel_values type: {type(processed['pixel_values'])}")
         else:
-            pixel_values = None
-            logger.debug("No images to process.")
-
-        if pixel_values is None:
-            logger.error("pixel_values is None. Cannot generate response without valid image data.")
-            raise ValueError("Image processing failed. 'pixel_values' is None.")
+            pixel_values = None  # Handle cases with no images if applicable
 
         # Generate response
-        try:
-            logger.debug("Generating response with model...")
-            output = model.generate(
+        with torch.no_grad():
+            outputs = model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 pixel_values=pixel_values,
-                max_new_tokens=512,
-                do_sample=True,
-                temperature=0.7,
-                top_k=50,
-                top_p=0.95,
-                num_return_sequences=1,
+                max_new_tokens=150
             )
-            logger.debug(f"Model output shape: {output.shape}")
-        except Exception as gen_e:
-            logger.error(f"Error during model.generate: {str(gen_e)}")
-            raise
 
-        # Decode the output
-        response = tokenizer.decode(output[0], skip_special_tokens=True)
-        logger.debug(f"Decoded response length: {len(response)}")
+        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        tokens_consumed = outputs.shape[1]
 
         return {
-            "answer": response,
-            "tokens_consumed": len(output[0])
+            "answer": answer,
+            "tokens_consumed": tokens_consumed
         }
 
     except Exception as e:
-        logger.error(f"Error in generate_minicpm_response: {str(e)}", exc_info=True)
+        logger.error(f"Error in generate_minicpm_response: {e}", exc_info=True)
         raise
 
 def query_document(doc_id, query, k=3):
     try:
         document_indices = load_document_indices()
-        if doc_id not in document_indices:
-            raise ValueError(f"Invalid document_id: {doc_id}")
+        index_path = document_indices.get(doc_id)
+        if not index_path:
+            raise ValueError(f"No index found for document {doc_id}")
 
-        index_path = document_indices[doc_id]
-        logger.info(f"Loading index from path: {index_path}")
-        
-        # Use the RAG model from app config
+        # Initialize RAG model from app config
         RAG = current_app.config['RAG']
-        RAG_specific = RAG.from_index(index_path)
-
+        
+        # Perform the search
         logger.info(f"Performing search with query: {query}")
-        results = RAG_specific.search(query, k=k)
+        rag_results = RAG.search(query, index_name=index_path, k=k)
+        
+        # Log the number of results
+        logger.info(f"Number of results returned by byaldi: {len(rag_results)}")
 
-        # Process the results
-        serializable_results = []
+        # Process results
         image_paths = []
-        for i, result in enumerate(results):
-            serializable_result = {
+        serializable_results = []
+        for i, result in enumerate(rag_results):
+            logger.info(f"Result {i+1}:")
+            logger.info(f"  Doc ID: {result.doc_id}")
+            logger.info(f"  Page Number: {result.page_num}")
+            logger.info(f"  Score: {result.score}")
+            logger.info(f"  Metadata: {result.metadata}")
+            
+            # Check if there's an image associated with this result
+            if result.base64:
+                logger.info(f"  Image found for result {i+1}")
+                # Save image to a temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_image:
+                    image_data = base64.b64decode(result.base64)
+                    temp_image.write(image_data)
+                    image_paths.append(temp_image.name)
+                logger.info(f"  Image saved to: {temp_image.name}")
+            else:
+                logger.info(f"  No image found for result {i+1}")
+
+            serializable_results.append({
                 "doc_id": result.doc_id,
                 "page_num": result.page_num,
                 "score": result.score,
                 "metadata": result.metadata,
-                # "base64": result.base64  # Optional: Include if needed
-            }
-            
-            # Handle image data if present
-            if result.base64:
-                try:
-                    # Decode base64 image
-                    image_data = base64.b64decode(result.base64)
-                    image = Image.open(BytesIO(image_data)).convert("RGB")
-                    
-                    # Save image to a temporary file
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
-                        image.save(temp_file, format='JPEG')
-                        image_paths.append(temp_file.name)
-                    
-                    serializable_result["image_path"] = temp_file.name
-                except Exception as img_e:
-                    logger.error(f"Failed to process image for result {i}: {str(img_e)}")
-            
-            serializable_results.append(serializable_result)
+                "has_image": bool(result.base64)
+            })
 
-        # Generate context from metadata
-        context = "\n".join([f"Excerpt {i+1}:\n{result['metadata']}" for i, result in enumerate(serializable_results)])
+        logger.info(f"Total number of images found: {len(image_paths)}")
 
-        prompt = f"Based on the following excerpts and images, please answer this question: {query}\n\n{context}"
+        # Generate context and prompt
+        context = "\n".join([f"Result {i+1}:\n{result['metadata']}" for i, result in enumerate(serializable_results)])
+        prompt = f"Based on the following search results, please answer this question: {query}\n\n{context}"
 
+        # Generate response
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
-        logger.debug(f"Using device {device} for generating response.")
-
-        # Generate the response with image_paths
         response = generate_minicpm_response(prompt, image_paths, device)
 
         # Clean up temporary image files
         for path in image_paths:
-            try:
-                os.unlink(path)
-                logger.debug(f"Deleted temporary image file: {path}")
-            except Exception as del_e:
-                logger.warning(f"Failed to delete temporary image file {path}: {del_e}")
+            os.unlink(path)
+            logger.info(f"Deleted temporary image file: {path}")
 
         return {
             "results": serializable_results,
-            "answer": response["answer"],  # Corrected key
+            "answer": response["answer"],
             "tokens_consumed": response["tokens_consumed"]
         }
 
