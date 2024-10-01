@@ -1,4 +1,8 @@
 import os
+import torch
+from app.utils.image_processor import ImageProcessor
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'your-secret-key'
@@ -14,3 +18,8 @@ class Config:
     INDEX_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'indices')
     DOCUMENT_INDEX_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'document_indices.json')
     
+    config = {
+        'DEVICE': device,
+        'IMAGE_PROCESSOR': ImageProcessor(device)
+    }
+

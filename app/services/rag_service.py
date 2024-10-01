@@ -16,13 +16,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def generate_minicpm_response(prompt, image_paths, device):
+def generate_minicpm_response(prompt, image_paths):
     try:
         tokenizer = current_app.config['TOKENIZER']
         model = current_app.config['MODEL']
         image_processor = current_app.config['IMAGE_PROCESSOR']
         RAG = current_app.config['RAG']
-
+        device = current_app.config['DEVICE']
+        
         logger.debug("Preparing the prompt for MiniCPM.")
 
         # Tokenize the prompt
@@ -30,36 +31,46 @@ def generate_minicpm_response(prompt, image_paths, device):
         input_ids = tokens['input_ids'].to(device)
         attention_mask = tokens['attention_mask'].to(device)
 
-        # Process all images at once
-        images = [Image.open(image_path).convert('RGB') for image_path in image_paths]
-        processed_images = image_processor(images=images, return_tensors='pt')
-        pixel_values = processed_images['pixel_values'].to(device)
+        # Process all images using the ImageProcessor
+        pixel_values = image_processor.process_images(image_paths)
 
-        logger.debug(f"Processed images shape: {pixel_values.shape}")
+        logger.debug("Images have been processed and moved to the device.")
 
-        # Generate response from model
+        # Perform RAG search or other operations as needed
+        rag_results = RAG.search(prompt, image_paths=image_paths, k=3)
+
+        # Formulate context and generate response
+        context = "\n".join([f"Image {i+1}:\n{result['metadata']}" for i, result in enumerate(rag_results)])
+        updated_prompt = f"Based on the following image descriptions, please answer this question: {prompt}\n\n{context}"
+        
+        # Tokenize the updated prompt
+        updated_tokens = tokenizer(updated_prompt, return_tensors='pt')
+        updated_input_ids = updated_tokens['input_ids'].to(device)
+        updated_attention_mask = updated_tokens['attention_mask'].to(device)
+
+        logger.debug(f"Updated prompt for model generation: {updated_prompt}")
+
+        # Generate response using the model
         outputs = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            pixel_values=pixel_values
+            input_ids=updated_input_ids,
+            attention_mask=updated_attention_mask,
+            max_new_tokens=150,  # Adjust as needed
+            do_sample=True,
+            top_k=50,
+            top_p=0.95,
+            temperature=0.7
         )
-        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-        # Clean up temporary files
-        for image_path in image_paths:
-            try:
-                os.unlink(image_path)
-                logger.info(f"Deleted temporary image file: {image_path}")
-            except Exception as cleanup_e:
-                logger.error(f"Failed to delete temporary image file {image_path}: {cleanup_e}", exc_info=True)
+        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        tokens_consumed = outputs.shape[1]  # Number of tokens generated
 
         return {
             "answer": answer,
-            "tokens_consumed": len(input_ids[0])
+            "tokens_consumed": tokens_consumed
         }
 
     except Exception as e:
-        logger.error(f"Error in generate_minicpm_response: {e}", exc_info=True)
+        logger.error(f"Error in generate_minicpm_response: {str(e)}", exc_info=True)
         raise
 
 def query_document(doc_id, query, k=3):
@@ -124,7 +135,7 @@ def query_document(doc_id, query, k=3):
 
         # Generate response
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
-        response = generate_minicpm_response(prompt, image_paths, device)
+        response = generate_minicpm_response(prompt, image_paths)
 
         return {
             "results": serializable_results,
@@ -166,7 +177,7 @@ def query_image(image, query, user_id):
 
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
         logger.debug(f"Using device {device} for generating response.")
-        response = generate_minicpm_response(prompt, [image_path], device)
+        response = generate_minicpm_response(prompt, [image_path])
 
         return {
             "results": serializable_results,
