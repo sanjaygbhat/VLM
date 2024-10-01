@@ -28,15 +28,16 @@ def initialize_model(rank, world_size):
         # Use mixed precision
         dtype = torch.float16 if torch.cuda.is_available() else torch.float32
         
-        # Implement more granular model parallelism
-        total_layers = 32  # Adjust this based on the actual number of layers in MiniCPM-V-2_6
+        # Set total_layers based on actual model configuration
+        total_layers = 24  # Adjust this based on the actual number of layers in MiniCPM-V-2_6
         layers_per_gpu = total_layers // world_size
         start_layer = rank * layers_per_gpu
         end_layer = start_layer + layers_per_gpu if rank != world_size - 1 else total_layers
 
-        device_map = {f"transformer.layers.{i}": rank for i in range(start_layer, end_layer)}
-        device_map["transformer.embed_tokens"] = 0  # Corrected mapping
-        device_map["transformer.norm"] = world_size - 1
+        # Correct device_map with accurate module names
+        device_map = {f"llm.model.layers.{i}": rank for i in range(start_layer, end_layer)}
+        device_map["llm.model.embed_tokens"] = 0  # Corrected mapping
+        device_map["llm.model.norm"] = world_size - 1
         device_map["lm_head"] = world_size - 1
 
         model = AutoModelForCausalLM.from_pretrained(
@@ -55,6 +56,14 @@ def initialize_model(rank, world_size):
             trust_remote_code=True
         )
         logger.info(f"Process {rank}: Model, tokenizer, and image processor initialized successfully.")
+
+        # Optional: Log module names for verification
+        for name, module in model.named_modules():
+            logger.debug(f"Module Name: {name}")
+        
+        layer_names = [name for name, module in model.named_modules() if 'layers.' in name]
+        logger.info(f"Total transformer layers found: {len(layer_names)}")
+        
         return model, tokenizer, image_processor
     except Exception as e:
         logger.error(f"Process {rank}: Failed to initialize model - {e}")
