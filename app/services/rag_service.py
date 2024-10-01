@@ -29,15 +29,25 @@ def generate_minicpm_response(prompt, image_paths, device):
         input_ids = tokens['input_ids'].to(device)
         attention_mask = tokens['attention_mask'].to(device)
 
-        # Process images in batch
+        # Process images in memory
         images = []
         for image_path in image_paths:
-            with Image.open(image_path) as img:
+            try:
+                with open(image_path, 'rb') as f:
+                    img_data = f.read()
+                img = Image.open(BytesIO(img_data)).convert("RGB")
                 images.append(img)
+                logger.debug(f"Loaded image {image_path} into memory.")
+            except Exception as img_e:
+                logger.error(f"Failed to process image {image_path}: {img_e}", exc_info=True)
+                raise
 
         if images:
             # Process all images together
             processed = image_processor(images, return_tensors="pt")
+            if 'pixel_values' not in processed:
+                logger.error("Image processor did not return 'pixel_values'. Available keys: {}".format(processed.keys()))
+                raise ValueError("Image processing failed: 'pixel_values' not found.")
             pixel_values = processed['pixel_values'].to(device)
             logger.debug(f"Processed pixel_values type: {type(processed['pixel_values'])}")
         else:
@@ -99,7 +109,7 @@ def query_document(doc_id, query, k=3):
             logger.info(f"  Metadata: {result['metadata']}")
             
             # Check if there's an image associated with this result
-            if result['base64']:
+            if result.get('base64'):
                 logger.info(f"  Image found for result {i+1}")
                 # Save image to a temporary file
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_image:
@@ -115,7 +125,7 @@ def query_document(doc_id, query, k=3):
                 "page_num": result['page_num'],
                 "score": result['score'],
                 "metadata": result['metadata'],
-                "has_image": bool(result['base64'])
+                "has_image": bool(result.get('base64'))
             })
 
         logger.info(f"Total number of images found: {len(image_paths)}")
@@ -130,8 +140,11 @@ def query_document(doc_id, query, k=3):
 
         # Clean up temporary image files
         for path in image_paths:
-            os.unlink(path)
-            logger.info(f"Deleted temporary image file: {path}")
+            try:
+                os.unlink(path)
+                logger.info(f"Deleted temporary image file: {path}")
+            except Exception as cleanup_e:
+                logger.error(f"Failed to delete temporary image file {path}: {cleanup_e}", exc_info=True)
 
         return {
             "results": serializable_results,
@@ -176,13 +189,18 @@ def query_image(image, query, user_id):
         response = generate_minicpm_response(prompt, [image_path], device)
 
         # Clean up the temporary file
-        os.unlink(image_path)
+        try:
+            os.unlink(image_path)
+            logger.info(f"Deleted temporary image file: {image_path}")
+        except Exception as cleanup_e:
+            logger.error(f"Failed to delete temporary image file {image_path}: {cleanup_e}", exc_info=True)
 
         return {
             "results": serializable_results,
             "answer": response["answer"],
             "tokens_consumed": response["tokens_consumed"]
         }
+
     except Exception as e:
         logger.error(f"Error in query_image: {str(e)}", exc_info=True)
         raise
