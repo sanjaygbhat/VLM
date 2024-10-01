@@ -42,14 +42,36 @@ def generate_minicpm_response(prompt, image_paths, device):
             try:
                 # Process all images together
                 processed = image_processor(images, return_tensors="pt")
-                pixel_values = processed['pixel_values'].to(device)
-                logger.debug(f"Processed pixel_values type: {type(processed['pixel_values'])}")
+                pixel_values = processed.get('pixel_values', None)
+                
+                if pixel_values is None:
+                    logger.error("Processed pixel_values is missing.")
+                    raise ValueError("Image processing failed: 'pixel_values' not found.")
+
+                # Handle pixel_values being a list or tensor
+                if isinstance(pixel_values, list):
+                    try:
+                        pixel_values = torch.stack(pixel_values).to(device)
+                        logger.debug("Converted pixel_values from list to tensor.")
+                    except Exception as stack_e:
+                        logger.error(f"Failed to stack pixel_values list into tensor: {str(stack_e)}")
+                        raise
+                elif isinstance(pixel_values, torch.Tensor):
+                    pixel_values = pixel_values.to(device)
+                    logger.debug(f"pixel_values is already a tensor. Type: {type(pixel_values)}")
+                else:
+                    logger.error(f"Unexpected type for pixel_values: {type(pixel_values)}")
+                    raise TypeError(f"Unexpected type for pixel_values: {type(pixel_values)}")
             except Exception as img_proc_e:
                 logger.error(f"Failed to process images: {str(img_proc_e)}")
-                pixel_values = None  # Depending on your application, consider raising an error
+                pixel_values = None
         else:
             pixel_values = None  # Handle cases with no images if applicable
             logger.debug("No images to process.")
+
+        if pixel_values is None:
+            logger.error("pixel_values is None. Cannot generate response without valid image data.")
+            raise ValueError("Image processing failed. 'pixel_values' is None.")
 
         # Generate response
         with torch.no_grad():
