@@ -75,18 +75,31 @@ def generate_device_map(model, world_size, rank):
 def initialize_model(rank, world_size):
     device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Process {rank}: Using device {device}")
-    
+
     try:
+        # Load the model with CPU memory optimization
         model = AutoModelForCausalLM.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
-            device_map='auto',  # Use automatic device mapping
             torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32,
             load_in_8bit=False,
             low_cpu_mem_usage=True,
             trust_remote_code=True
         )
-        model.to(device)  # Ensure model is moved to the device
-        logger.info(f"Process {rank}: Model loaded and moved to {device}")
+
+        # Generate a custom device map
+        device_map = generate_device_map(model, world_size, rank)
+        logger.debug(f"Process {rank}: Custom device map created.")
+
+        # Move each module to the appropriate device
+        for module_name, gpu_id in device_map.items():
+            module = dict(model.named_modules()).get(module_name)
+            if module is not None:
+                module.to(f'cuda:{gpu_id}')
+                logger.debug(f"Process {rank}: Moved {module_name} to cuda:{gpu_id}")
+            else:
+                logger.warning(f"Process {rank}: Module {module_name} not found in the model.")
+
+        logger.info(f"Process {rank}: Model layers assigned to GPUs based on custom device map.")
         
         tokenizer = AutoTokenizer.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
@@ -101,7 +114,7 @@ def initialize_model(rank, world_size):
         logger.info(f"Process {rank}: Tokenizer and image processor initialized.")
         
         return model, tokenizer, image_processor
-    
+
     except Exception as e:
         logger.error(f"Process {rank}: Failed to initialize model - {e}", exc_info=True)
         raise
