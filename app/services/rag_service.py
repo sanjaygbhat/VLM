@@ -21,6 +21,7 @@ def generate_minicpm_response(prompt, image_paths, device):
         tokenizer = current_app.config['TOKENIZER']
         model = current_app.config['MODEL']
         image_processor = current_app.config['IMAGE_PROCESSOR']
+        RAG = current_app.config['RAG']
 
         logger.debug("Preparing the prompt for MiniCPM.")
 
@@ -29,45 +30,32 @@ def generate_minicpm_response(prompt, image_paths, device):
         input_ids = tokens['input_ids'].to(device)
         attention_mask = tokens['attention_mask'].to(device)
 
-        # Process images in memory
-        images = []
+        # Process all images at once
+        images = [Image.open(image_path).convert('RGB') for image_path in image_paths]
+        processed_images = image_processor(images=images, return_tensors='pt')
+        pixel_values = processed_images['pixel_values'].to(device)
+
+        logger.debug(f"Processed images shape: {pixel_values.shape}")
+
+        # Generate response from model
+        outputs = model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            pixel_values=pixel_values
+        )
+        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Clean up temporary files
         for image_path in image_paths:
             try:
-                with open(image_path, 'rb') as f:
-                    img_data = f.read()
-                img = Image.open(BytesIO(img_data)).convert("RGB")
-                images.append(img)
-                logger.debug(f"Loaded image {image_path} into memory.")
-            except Exception as img_e:
-                logger.error(f"Failed to process image {image_path}: {img_e}", exc_info=True)
-                raise
-
-        if images:
-            # Process all images together
-            processed = image_processor(images, return_tensors="pt")
-            if 'pixel_values' not in processed:
-                logger.error("Image processor did not return 'pixel_values'. Available keys: {}".format(processed.keys()))
-                raise ValueError("Image processing failed: 'pixel_values' not found.")
-            pixel_values = processed['pixel_values'].to(device)
-            logger.debug(f"Processed pixel_values type: {type(pixel_values)}")
-        else:
-            pixel_values = None  # Handle cases with no images if applicable
-
-        # Generate response
-        with torch.no_grad():
-            outputs = model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                pixel_values=pixel_values,
-                max_new_tokens=150
-            )
-
-        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        tokens_consumed = outputs.shape[1]
+                os.unlink(image_path)
+                logger.info(f"Deleted temporary image file: {image_path}")
+            except Exception as cleanup_e:
+                logger.error(f"Failed to delete temporary image file {image_path}: {cleanup_e}", exc_info=True)
 
         return {
             "answer": answer,
-            "tokens_consumed": tokens_consumed
+            "tokens_consumed": len(input_ids[0])
         }
 
     except Exception as e:
@@ -138,14 +126,6 @@ def query_document(doc_id, query, k=3):
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
         response = generate_minicpm_response(prompt, image_paths, device)
 
-        # Clean up temporary image files
-        for path in image_paths:
-            try:
-                os.unlink(path)
-                logger.info(f"Deleted temporary image file: {path}")
-            except Exception as cleanup_e:
-                logger.error(f"Failed to delete temporary image file {path}: {cleanup_e}", exc_info=True)
-
         return {
             "results": serializable_results,
             "answer": response["answer"],
@@ -187,13 +167,6 @@ def query_image(image, query, user_id):
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
         logger.debug(f"Using device {device} for generating response.")
         response = generate_minicpm_response(prompt, [image_path], device)
-
-        # Clean up the temporary file
-        try:
-            os.unlink(image_path)
-            logger.info(f"Deleted temporary image file: {image_path}")
-        except Exception as cleanup_e:
-            logger.error(f"Failed to delete temporary image file {image_path}: {cleanup_e}", exc_info=True)
 
         return {
             "results": serializable_results,
