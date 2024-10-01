@@ -9,9 +9,9 @@ import logging
 # Import initialization functions for CUDA and RAG
 from app.cuda_init import initialize_rag
 
-# Configure logging
+# Configure logging with DEBUG level
 logging.basicConfig(
-    level=logging.DEBUG,  # Set to DEBUG for detailed logging
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -33,44 +33,46 @@ def initialize_model(rank, world_size):
         dtype = torch.float16 if torch.cuda.is_available() else torch.float32
         logger.debug(f"Process {rank}: Using dtype {dtype}.")
 
-        # Initialize the full device_map dynamically
-        # This approach ensures that all modules are correctly mapped
-        logger.debug("Initializing device map dynamically.")
-
-        # First, load the configuration to get module names
-        config = AutoModelForCausalLM.from_pretrained(
+        # Load the model and its configuration
+        model = AutoModelForCausalLM.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
-            trust_remote_code=True,
             torch_dtype=dtype,
+            device_map=None,  # We'll handle device mapping manually
+            trust_remote_code=True,
             low_cpu_mem_usage=True,
-        ).config
+        )
+        config = model.config
+        logger.debug(f"Process {rank}: Loaded model and configuration.")
 
-        # Assume 'layers' are named appropriately in the config
-        total_layers = len(config.transformer.layers)
-        logger.info(f"Total transformer layers found in config: {total_layers}")
+        # Log all available attributes in the configuration
+        config_attrs = dir(config)
+        logger.debug(f"Process {rank}: Available config attributes: {config_attrs}")
+
+        # Correctly access the transformer layers
+        if hasattr(config, 'llm') and hasattr(config.llm, 'model'):
+            total_layers = len(config.llm.model.layers)
+            logger.info(f"Process {rank}: Total transformer layers found: {total_layers}")
+        else:
+            logger.error(f"Process {rank}: 'MiniCPMVConfig' does not have 'llm.model.layers'")
+            raise AttributeError("'MiniCPMVConfig' does not have 'llm.model.layers'")
+
+        # Calculate layers per GPU
         layers_per_gpu = total_layers // world_size
-        logger.debug(f"Layers per GPU: {layers_per_gpu}")
+        start_layer = rank * layers_per_gpu
+        end_layer = start_layer + layers_per_gpu if rank != world_size - 1 else total_layers
+        logger.debug(f"Process {rank}: Assigning layers {start_layer} to {end_layer} to GPU {rank}.")
 
-        device_map = {}
+        # Create device_map based on the correct attribute
+        device_map = {
+            f"llm.model.layers.{i}": rank for i in range(start_layer, end_layer)
+        }
+        device_map["llm.model.embed_tokens"] = 0  # Assign embedding layer to GPU 0
+        device_map["llm.model.norm"] = world_size - 1
+        device_map["lm_head"] = world_size - 1
 
-        for gpu in range(world_size):
-            start_layer = gpu * layers_per_gpu
-            # Ensure the last GPU takes any remaining layers
-            end_layer = start_layer + layers_per_gpu if gpu != world_size - 1 else total_layers
-            for layer_idx in range(start_layer, end_layer):
-                layer_name = f"llm.model.layers.{layer_idx}"
-                device_map[layer_name] = gpu
-                logger.debug(f"Assigning {layer_name} to GPU {gpu}.")
+        logger.debug(f"Process {rank}: Device map: {device_map}")
 
-        # Assign embedding, norm, and head layers
-        device_map["llm.model.embed_tokens"] = 0  # Embedding layer to GPU 0
-        device_map["llm.model.norm"] = world_size - 1  # Norm layer to last GPU
-        device_map["lm_head"] = world_size - 1  # Output head to last GPU
-        logger.debug(f"Assigned embed_tokens, norm, and lm_head to GPUs.")
-
-        logger.debug(f"Final device map: {device_map}")
-
-        # Now, load the model with the constructed device_map
+        # Load model with the updated device_map
         model = AutoModelForCausalLM.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
             torch_dtype=dtype,
@@ -78,30 +80,24 @@ def initialize_model(rank, world_size):
             trust_remote_code=True,
             low_cpu_mem_usage=True,
         )
+        logger.info(f"Process {rank}: Model loaded with device mapping.")
 
         tokenizer = AutoTokenizer.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
             trust_remote_code=True
         )
-        logger.debug(f"Process {rank}: Tokenizer initialized.")
-
         image_processor = AutoImageProcessor.from_pretrained(
             "openbmb/MiniCPM-V-2_6",
             trust_remote_code=True
         )
-        logger.debug(f"Process {rank}: Image processor initialized.")
+        logger.info(f"Process {rank}: Tokenizer and image processor initialized.")
 
-        logger.info(f"Process {rank}: Model, tokenizer, and image processor initialized successfully.")
-
-        # Optional: Log module names for verification
-        logger.debug("Listing all module names in the model:")
+        # Log all module names to ensure correct mapping
         for name, module in model.named_modules():
-            logger.debug(f"Module Name: {name}")
-
-        layer_names = [name for name, module in model.named_modules() if 'layers.' in name]
-        logger.info(f"Process {rank}: Total transformer layers found: {len(layer_names)}")
+            logger.debug(f"Process {rank}: Module Name: {name}")
 
         return model, tokenizer, image_processor
+
     except Exception as e:
         logger.error(f"Process {rank}: Failed to initialize model - {e}", exc_info=True)
         raise
