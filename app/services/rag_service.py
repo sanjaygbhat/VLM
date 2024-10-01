@@ -31,8 +31,9 @@ def generate_minicpm_response(prompt, image_paths):
         input_ids = tokens['input_ids'].to(device)
         attention_mask = tokens['attention_mask'].to(device)
 
-        # Process all images using the ImageProcessor
-        pixel_values = image_processor.process_images(image_paths)
+        # Process images using the MiniCPMVImageProcessor
+        images = [Image.open(path).convert('RGB') for path in image_paths]
+        pixel_values = image_processor(images, return_tensors="pt").pixel_values.to(device)
 
         logger.debug("Images have been processed and moved to the device.")
 
@@ -54,6 +55,7 @@ def generate_minicpm_response(prompt, image_paths):
         outputs = model.generate(
             input_ids=updated_input_ids,
             attention_mask=updated_attention_mask,
+            pixel_values=pixel_values,
             max_new_tokens=150,  # Adjust as needed
             do_sample=True,
             top_k=50,
