@@ -29,16 +29,19 @@ def generate_minicpm_response(prompt, image_paths, device):
         input_ids = tokens['input_ids'].to(device)
         attention_mask = tokens['attention_mask'].to(device)
 
-        # Process images
-        pixel_values = []
+        # Process images in batch
+        images = []
         for image_path in image_paths:
             with Image.open(image_path) as img:
-                pixel_value = image_processor(img, return_tensors="pt").pixel_values
-                pixel_values.append(pixel_value.to(device))
+                images.append(img)
 
-        # Stack the pixel values
-        if pixel_values:
-            pixel_values = torch.cat(pixel_values, dim=0)
+        if images:
+            # Process all images together
+            processed = image_processor(images, return_tensors="pt")
+            pixel_values = processed['pixel_values'].to(device)
+            logger.debug(f"Processed pixel_values type: {type(processed['pixel_values'])}")
+        else:
+            pixel_values = None  # Handle cases with no images if applicable
 
         # Generate response
         with torch.no_grad():
