@@ -29,7 +29,7 @@ def initialize_llm(rank, world_size):
     device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Process {rank}: Using device {device}")
 
-    # Load the model directly to the assigned device
+    # Since device mapping is handled in run.py, simply return the model and tokenizer
     try:
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,
