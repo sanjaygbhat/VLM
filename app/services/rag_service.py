@@ -76,7 +76,8 @@ def query_document(doc_id, query, k=3):
         
         # Perform the search
         logger.info(f"Performing search with query: {query}")
-        rag_results = RAG.search(query, index_name=index_path, k=k)
+        # Remove the index_name parameter
+        rag_results = RAG.search(query, k=k)
         
         # Log the number of results
         logger.info(f"Number of results returned by byaldi: {len(rag_results)}")
