@@ -77,9 +77,9 @@ def query_document(doc_id, query, k=3):
         
         logger.info(f"Index file size: {os.path.getsize(index_path)}")
 
-        # Initialize a new RAG model instance for this query
-        logger.info("Initializing new RAG model instance with the index")
-        RAG = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2", index_path=index_path)
+        # Initialize the RAG model with the correct index
+        logger.info("Initializing RAG model with the index")
+        RAG = RAGMultiModalModel.from_index(index_path)
         
         # Perform the search
         logger.info(f"Performing search with query: {query}")
@@ -93,17 +93,17 @@ def query_document(doc_id, query, k=3):
         serializable_results = []
         for i, result in enumerate(rag_results):
             logger.info(f"Result {i+1}:")
-            logger.info(f"  Doc ID: {result.doc_id}")
-            logger.info(f"  Page Number: {result.page_num}")
-            logger.info(f"  Score: {result.score}")
-            logger.info(f"  Metadata: {result.metadata}")
+            logger.info(f"  Doc ID: {result['doc_id']}")
+            logger.info(f"  Page Number: {result['page_num']}")
+            logger.info(f"  Score: {result['score']}")
+            logger.info(f"  Metadata: {result['metadata']}")
             
             # Check if there's an image associated with this result
-            if result.base64:
+            if result['base64']:
                 logger.info(f"  Image found for result {i+1}")
                 # Save image to a temporary file
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_image:
-                    image_data = base64.b64decode(result.base64)
+                    image_data = base64.b64decode(result['base64'])
                     temp_image.write(image_data)
                     image_paths.append(temp_image.name)
                 logger.info(f"  Image saved to: {temp_image.name}")
@@ -111,11 +111,11 @@ def query_document(doc_id, query, k=3):
                 logger.info(f"  No image found for result {i+1}")
 
             serializable_results.append({
-                "doc_id": result.doc_id,
-                "page_num": result.page_num,
-                "score": result.score,
-                "metadata": result.metadata,
-                "has_image": bool(result.base64)
+                "doc_id": result['doc_id'],
+                "page_num": result['page_num'],
+                "score": result['score'],
+                "metadata": result['metadata'],
+                "has_image": bool(result['base64'])
             })
 
         logger.info(f"Total number of images found: {len(image_paths)}")
