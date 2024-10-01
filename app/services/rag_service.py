@@ -4,6 +4,11 @@ import torch
 from app.utils.helpers import load_document_indices
 import logging
 
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,  # Set to DEBUG for detailed logging
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 def generate_minicpm_response(prompt, image_path, device):
@@ -12,6 +17,7 @@ def generate_minicpm_response(prompt, image_path, device):
         model = current_app.config['MODEL']
         image_processor = current_app.config['IMAGE_PROCESSOR']
 
+        logger.debug("Preparing the prompt for MiniCPM.")
         messages = [{"role": "user", "content": prompt}]
         minicpm_prompt = tokenizer.apply_chat_template(
             messages,
@@ -19,19 +25,24 @@ def generate_minicpm_response(prompt, image_path, device):
             add_generation_prompt=True
         )
 
+        logger.debug("Tokenizing the input prompt.")
         inputs = tokenizer(minicpm_prompt, return_tensors="pt").to(device)
 
         # Initialize pixel_values as None
         pixel_values = None
 
         if image_path:
+            logger.debug(f"Processing image at path: {image_path}")
             image = Image.open(image_path).convert("RGB")
-            # Process the image here (you might need to resize, normalize, etc.)
+            # Process the image here (resize, normalize, etc.)
             pixel_values = image_processor(images=image, return_tensors="pt").pixel_values.to(device)
+            logger.debug("Image processing complete.")
         else:
             # If no image, create a dummy tensor of the correct shape
+            logger.debug("No image provided. Creating dummy pixel_values.")
             pixel_values = torch.zeros((1, 3, 224, 224), device=device)
 
+        logger.debug("Generating response with MiniCPM.")
         with torch.no_grad():
             outputs = model.generate(
                 input_ids=inputs.input_ids,
@@ -43,6 +54,7 @@ def generate_minicpm_response(prompt, image_path, device):
             )
 
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        logger.debug("Response generated successfully.")
 
         return {
             "answer": response,
@@ -83,7 +95,7 @@ def query_document(doc_id, query, k=3):
         prompt = f"Based on the following excerpts, please answer this question: {query}\n\n{context}"
 
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
-        logger.info(f"Generating response using device: {device}")
+        logger.debug(f"Using device {device} for generating response.")
         response = generate_minicpm_response(prompt, None, device)  # Pass None for image_path
 
         return {
@@ -99,6 +111,7 @@ def query_image(image, query):
     try:
         image_path = image.filename
         image.save(image_path)
+        logger.info(f"Saved image to path: {image_path}")
 
         RAG_specific = current_app.config['RAG'].from_index(index_path=image_path)
         rag_results = RAG_specific.search(query, image_path=image_path)
@@ -117,6 +130,7 @@ def query_image(image, query):
         prompt = f"Based on the following image descriptions, please answer this question: {query}\n\n{context}"
 
         device = torch.device(f'cuda:{current_app.config["RANK"]}' if torch.cuda.is_available() else 'cpu')
+        logger.debug(f"Using device {device} for generating response.")
         response = generate_minicpm_response(prompt, image_path, device)
 
         return {
