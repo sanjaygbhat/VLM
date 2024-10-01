@@ -1,28 +1,35 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoImageProcessor
 from config import Config
-from datetime import timedelta
+import logging
 
 db = SQLAlchemy()
+migrate = Migrate()
 jwt = JWTManager()
 
-def create_app(config_class=Config):
-    app = Flask(__name__)
-    app.config.from_object(config_class)
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-    # JWT configurations
-    app.config['JWT_SECRET_KEY'] = app.config['SECRET_KEY']
-    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object('config.Config')  # Ensure you have a Config class
 
     db.init_app(app)
+    migrate.init_app(app, db)
     jwt.init_app(app)
 
+    # Import models
+    from app.models.user import User
+    from app.models.document import Document
+
+    # Import and register blueprints
     from app.routes import auth, document, query
     app.register_blueprint(auth.bp)
     app.register_blueprint(document.bp)
     app.register_blueprint(query.bp)
 
     return app
-
-__all__ = ['create_app', 'db']

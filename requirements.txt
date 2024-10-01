@@ -1,6 +1,12 @@
 flask
-flask-sqlalchemy
-flask-jwt-extended
 werkzeug
-anthropic
+torch==1.13.1+cu117
+torchvision==0.14.1+cu117
+torchaudio==0.13.1+cu117
 byaldi
+transformers
+Pillow
+flask_sqlalchemy
+flask_migrate
+flask_jwt_extended
+psycopg2-binary
