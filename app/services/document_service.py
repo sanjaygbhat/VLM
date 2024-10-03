@@ -8,6 +8,7 @@ from app.services.rag_service import query_document
 from app import Config, db
 from app.utils.helpers import load_document_indices, save_document_indices
 from app.models.document import Document
+from flask import current_app
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,6 +31,10 @@ def upload_document(file, user_id):
     filename = secure_filename(file.filename)
     doc_id = str(uuid.uuid4())
     file_path = os.path.join(Config.UPLOAD_FOLDER, f"{doc_id}_{filename}")
+
+    # Ensure the upload directory exists
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
     file.save(file_path)
     logger.info(f"Document saved to {file_path}")
 
