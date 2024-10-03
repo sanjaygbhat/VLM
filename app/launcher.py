@@ -28,8 +28,9 @@ def setup(rank, world_size):
 def run_app(rank, world_size):
     setup(rank, world_size)
     
-    # Initialize MiniCPM
-    minicpm = MiniCPM(device=f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+    # Initialize MiniCPM with the specific CUDA device
+    device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
+    minicpm = MiniCPM(device=device)
     
     # Initialize the RAG model
     try:

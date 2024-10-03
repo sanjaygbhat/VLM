@@ -12,9 +12,10 @@ class MiniCPM:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             trust_remote_code=True,
-            torch_dtype=torch.float16 if device == 'cuda' else torch.float32,
-            device_map="auto"
+            torch_dtype=torch.float16 if device.startswith('cuda') else torch.float32
+            # Removed device_map="auto"
         )
+        self.model.to(device)  # Manually move the model to the specified device
         self.device = device
         self.model.eval()
         logger.info(f"MiniCPM model '{model_name}' loaded on {self.device}.")
