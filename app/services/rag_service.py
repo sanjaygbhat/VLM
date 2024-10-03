@@ -149,7 +149,7 @@ def query_minicpm(query, results):
             return "Model not initialized."
 
         # Prepare the input for MiniCPM
-        combined_input = query + " " + " ".join([res['content'] for res in results])
+        combined_input = query + " Context: " + " ".join([result.content for result in results])
 
         # Generate the response using MiniCPM
         answer = minicpm.generate_response(combined_input, max_length=150)

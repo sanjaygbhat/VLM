@@ -5,9 +5,7 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 import logging
 from byaldi import RAGMultiModalModel
-
-# Import initialization functions for CUDA and MiniCPM
-from app.cuda_init import initialize_model
+from app.models.minicpm_model import MiniCPM
 
 # Configure logging with DEBUG level
 logging.basicConfig(
@@ -29,8 +27,10 @@ def setup(rank, world_size):
 
 def run_app(rank, world_size):
     setup(rank, world_size)
-    minicpm, image_processor = initialize_model(rank, world_size)
-
+    
+    # Initialize MiniCPM
+    minicpm = MiniCPM(device=f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+    
     # Initialize the RAG model
     try:
         rag_model = RAGMultiModalModel.from_pretrained("vidore/colpali-v1.2")
@@ -43,9 +43,9 @@ def run_app(rank, world_size):
     from app import create_app
 
     app = create_app()
-    app.config['RAG'] = rag_model  # Store RAG model in app config
+    app.config['RAG'] = rag_model
     app.config['MINICPM'] = minicpm
-    app.config['IMAGE_PROCESSOR'] = image_processor
+    app.config['TOKENIZER'] = minicpm.tokenizer
 
     # Run the Flask app
     port = 5000 + rank

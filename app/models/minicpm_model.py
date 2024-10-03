@@ -1,4 +1,3 @@
-
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import logging
@@ -14,18 +13,17 @@ class MiniCPM:
             model_name,
             trust_remote_code=True,
             torch_dtype=torch.float16 if device == 'cuda' else torch.float32,
-            device_map={"": device}
+            device_map="auto"
         )
         self.device = device
-        self.model.to(self.device)
         self.model.eval()
         logger.info(f"MiniCPM model '{model_name}' loaded on {self.device}.")
 
     def generate_response(self, input_text, max_length=150):
         try:
-            inputs = self.tokenizer.encode(input_text, return_tensors='pt').to(self.device)
+            inputs = self.tokenizer(input_text, return_tensors="pt").to(self.device)
             with torch.no_grad():
-                outputs = self.model.generate(inputs, max_length=max_length)
+                outputs = self.model.generate(**inputs, max_length=max_length)
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             logger.info("MiniCPM generated a response successfully.")
             return response
