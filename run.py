@@ -42,9 +42,6 @@ def run_app(rank, world_size):
     app.config['TOKENIZER'] = tokenizer
     app.config['IMAGE_PROCESSOR'] = image_processor
 
-    # Initialize RAG (without loading any index)
-    # RAG instances are now created per query, so no need to initialize here
-
     # Run the Flask app
     port = 5000 + rank
     app.run(host='0.0.0.0', port=port)

@@ -113,48 +113,35 @@ def upload_document(file, user_id):
         logger.error(f"Failed to upload and index document: {e}", exc_info=True)
         return None
 
-def query_document(doc_id, query, k=3):
-    try:
-        document_indices = load_document_indices()
-        if doc_id not in document_indices:
-            raise ValueError(f"Document with id {doc_id} not found in indices.")
+def query_document(doc_id, query, k):
+    """
+    Query the document with the given ID and return byaldi results.
+    """
+    # Implement the actual byaldi querying here
+    # This is a placeholder implementation
+    # Replace with actual byaldi API calls
+    return [{"base64": "..."}, {"base64": "..."}, {"base64": "..."}]  # Example responses
 
-        index_path = document_indices[doc_id]
-        
-        if not os.path.exists(index_path):
-            logger.error(f"Index file {index_path} does not exist.")
-            raise ValueError("Index file not found.")
+def query_minicpm(query, images):
+    model = current_app.config['MODEL']
+    tokenizer = current_app.config['TOKENIZER']
+    device = current_app.config['DEVICE']
 
-        # Initialize a new RAG instance for the specific document
-        RAG = RAGMultiModalModel.from_index(index_path)
-        logger.debug(f"RAG model initialized with index {index_path} for doc_id {doc_id}.")
+    # Ensure the model is in evaluation mode and on the correct device
+    model = model.eval().to(device)
 
-        # Perform the search
-        rag_results = RAG.search(query, k=k)
+    # Prepare the message for the model
+    msgs = [{'role': 'user', 'content': [image for image in images]}]  # Assuming images are processed
 
-        if not rag_results:
-            logger.error("No passages provided")
-            raise ValueError("No passages provided")
-        
-        # Process results
-        serializable_results = [
-            {
-                "doc_id": result.doc_id,
-                "page_num": result.page_num,
-                "score": result.score,
-                "metadata": result.metadata,
-                "base64": result.base64 if hasattr(result, 'base64') else None
-            } for result in rag_results
-        ]
+    # Generate the answer
+    with torch.no_grad():
+        answer = model.chat(
+            image=None,
+            msgs=msgs,
+            tokenizer=tokenizer
+        )
 
-        return serializable_results
-
-    except ValueError as ve:
-        logger.error(f"ValueError in query_document: {ve}")
-        raise ve
-    except Exception as e:
-        logger.error(f"Unexpected error in query_document: {e}", exc_info=True)
-        raise e
+    return answer
 
 def query_image(image, query, user_id):
     try:
