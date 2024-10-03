@@ -4,7 +4,6 @@ import os
 import uuid
 import hashlib
 from werkzeug.utils import secure_filename
-from app.services.rag_service import query_document
 from app import Config, db
 from app.utils.helpers import load_document_indices, save_document_indices
 from app.models.document import Document
@@ -46,7 +45,7 @@ def upload_document(file, user_id):
     if existing_doc:
         logger.warning("Duplicate document found. Deleting the uploaded file.")
         os.remove(file_path)
-        return None  # Or return existing_doc.id, etc.
+        return existing_doc.id, 0  # Return existing_doc.id and zero indexing time
 
     # Step 4: Create document record
     document = Document(
@@ -59,12 +58,24 @@ def upload_document(file, user_id):
     db.session.commit()
     logger.info(f"Document record created with ID {doc_id}")
 
-    # Step 5: Index the document with byaldi
+    # Step 5: Index the document with Byaldi
     index_name = f"index_{doc_id}"
-    index_path = os.path.join(Config.INDEX_FOLDER, index_name)
     try:
-        # Assuming byaldi has a function to create index
-        query_document.create_index(file_path, index_path, index_name)
+        rag_model = current_app.config.get('RAG')
+        if not rag_model:
+            logger.error("RAG model not found in app config.")
+            db.session.delete(document)
+            db.session.commit()
+            return None
+
+        # Perform indexing using RAG's index method
+        rag_model.index(
+            input_path=file_path,
+            index_name=index_name,
+            store_collection_with_index=False,  # Adjust based on your needs
+            overwrite=True  # Overwrite existing index if necessary
+        )
+        index_path = os.path.join(Config.INDEX_FOLDER, index_name)
         logger.info(f"Document indexed at {index_path}")
     except Exception as e:
         logger.error(f"Indexing failed: {e}")

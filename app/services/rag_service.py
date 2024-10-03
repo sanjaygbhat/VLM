@@ -113,68 +113,87 @@ def upload_document(file, user_id):
         logger.error(f"Failed to upload and index document: {e}", exc_info=True)
         return None
 
-def query_document(doc_id, query, k):
+def query_document(doc_id, query, k=3):
     """
-    Query the document with the given ID and return byaldi results.
+    Query the document using Byaldi's RAG model.
     """
-    # Implement the actual byaldi querying here
-    # This is a placeholder implementation
-    # Replace with actual byaldi API calls
-    return [{"base64": "..."}, {"base64": "..."}, {"base64": "..."}]  # Example responses
-
-def query_minicpm(query, images):
-    model = current_app.config['MODEL']
-    tokenizer = current_app.config['TOKENIZER']
-    device = current_app.config['DEVICE']
-
-    # Ensure the model is in evaluation mode and on the correct device
-    model = model.eval().to(device)
-
-    # Prepare the message for the model
-    msgs = [{'role': 'user', 'content': [image for image in images]}]  # Assuming images are processed
-
-    # Generate the answer
-    with torch.no_grad():
-        answer = model.chat(
-            image=None,
-            msgs=msgs,
-            tokenizer=tokenizer
-        )
-
-    return answer
-
-def query_image(image, query, user_id):
     try:
-        # Get the model and tokenizer from the Flask app config
-        model = current_app.config['MODEL']
-        tokenizer = current_app.config['TOKENIZER']
-        device = current_app.config['DEVICE']
+        rag_model = current_app.config.get('RAG')
+        if not rag_model:
+            logger.error("RAG model not found in app config.")
+            return {"error": "RAG model not initialized."}
 
-        # Ensure the model is in evaluation mode and on the correct device
-        model = model.eval().to(device)
+        # Perform search using Byaldi's RAG model
+        results = rag_model.search(query, k=k)
+        logger.info(f"Query performed with term '{query}' and k={k}")
 
-        # Convert the image to RGB (assuming it's a file-like object)
-        pil_image = Image.open(image).convert('RGB')
-
-        # Prepare the message for the model
-        msgs = [{'role': 'user', 'content': [pil_image, query]}]
-
-        # Generate the answer
-        with torch.no_grad():
-            answer = model.chat(
-                image=None,
-                msgs=msgs,
-                tokenizer=tokenizer
-            )
-
-        # Log the successful query
-        logger.info(f"Successfully processed image query for user {user_id}")
+        # Process results with MiniCPM
+        answer = query_minicpm(query, results)
 
         return {
             "answer": answer,
-            "tokens_consumed": len(tokenizer.encode(answer))  # Estimate token consumption
+            "tokens_consumed": len(current_app.config.get('TOKENIZER').encode(answer))  # Estimate token consumption
+        }
+    except Exception as e:
+        logger.error(f"Error in query_document: {str(e)}", exc_info=True)
+        return {"error": "An error occurred while processing the query."}
+
+def query_minicpm(query, results):
+    """
+    Process the query results with MiniCPM.
+    """
+    try:
+        minicpm = current_app.config.get('MINICPM')
+        if not minicpm:
+            logger.error("MiniCPM instance not found in app config.")
+            return "Model not initialized."
+
+        # Prepare the input for MiniCPM
+        combined_input = query + " " + " ".join([res['content'] for res in results])
+
+        # Generate the response using MiniCPM
+        answer = minicpm.generate_response(combined_input, max_length=150)
+        logger.info("MiniCPM processed the query successfully.")
+
+        return answer
+    except Exception as e:
+        logger.error(f"Error in query_minicpm: {str(e)}", exc_info=True)
+        return "An error occurred while generating the response."
+
+def query_image(image, query, user_id):
+    """
+    Process image queries using Byaldi and MiniCPM.
+    """
+    try:
+        # Get the RAG model from the Flask app config
+        rag_model = current_app.config.get('RAG')
+        if not rag_model:
+            logger.error("RAG model not found in app config.")
+            return {"error": "RAG model not initialized."}
+
+        # Save the image temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
+            pil_image = Image.open(image).convert('RGB')
+            pil_image.save(tmp.name)
+            temp_image_path = tmp.name
+        logger.info(f"Image saved temporarily at {temp_image_path}")
+
+        # Perform search using Byaldi's RAG model with image
+        results = rag_model.search(query, k=3, image_path=temp_image_path)
+        logger.info(f"Image query performed with term '{query}'")
+
+        # Process results with MiniCPM
+        answer = query_minicpm(query, results)
+
+        # Clean up temporary image
+        os.remove(temp_image_path)
+        logger.info(f"Temporary image {temp_image_path} removed.")
+
+        return {
+            "answer": answer,
+            "tokens_consumed": len(current_app.config.get('TOKENIZER').encode(answer))  # Estimate token consumption
         }
 
     except Exception as e:
         logger.error(f"Error in query_image: {str(e)}", exc_info=True)
-        raise
+        return {"error": "An error occurred while processing the image query."}

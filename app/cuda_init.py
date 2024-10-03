@@ -1,7 +1,9 @@
+
 import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoImageProcessor
 import logging
+from app.models.minicpm_model import MiniCPM
 
 # Configure logging
 logging.basicConfig(
@@ -28,26 +30,18 @@ def initialize_model(rank, world_size):
     logger.info(f"Process {rank}: Using device {device}")
 
     try:
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_NAME,
-            trust_remote_code=True,
-            torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32,
-            device_map={"": device}
-        )
-        model.to(device)
-        logger.debug(f"Process {rank}: LLM model moved to {device}.")
-
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
-        logger.debug(f"Process {rank}: Tokenizer initialized.")
+        # Initialize MiniCPM
+        minicpm = MiniCPM(model_name=MODEL_NAME, device=device)
+        logger.debug(f"Process {rank}: MiniCPM model initialized on {device}.")
 
         # Initialize the Image Processor
         image_processor = AutoImageProcessor.from_pretrained(MODEL_NAME, trust_remote_code=True)
         logger.debug(f"Process {rank}: Image processor initialized.")
 
-        return model, tokenizer, image_processor
+        return minicpm, image_processor
 
     except Exception as e:
-        logger.error(f"Process {rank}: Failed to initialize LLM or Image Processor - {e}", exc_info=True)
+        logger.error(f"Process {rank}: Failed to initialize MiniCPM or Image Processor - {e}", exc_info=True)
         raise
 
 def cleanup():
